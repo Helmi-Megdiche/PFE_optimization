@@ -1,0 +1,329 @@
+# Deployment Guide — SafeGuard AI Parental Control Platform
+
+**Author:** Helmi Megdiche — ESPRIT (5th-year PFE)
+**Repository:** [github.com/Helmi-Megdiche/PFE](https://github.com/Helmi-Megdiche/PFE)
+**Document version:** 1.0 (final)
+**Audience:** developers and operators deploying the backend, database, dashboard, and Android app.
+
+> This guide covers both the **development** setup (the supported PFE demo path) and a **production-oriented** deployment (recommended hardening). Where the two differ, both are shown.
+
+---
+
+## Table of Contents
+
+1. [Deployment Overview](#1-deployment-overview)
+2. [Prerequisites](#2-prerequisites)
+3. [Environment Configuration](#3-environment-configuration)
+4. [Database Setup and Migrations](#4-database-setup-and-migrations)
+5. [Backend Deployment](#5-backend-deployment)
+6. [Parent Dashboard Deployment](#6-parent-dashboard-deployment)
+7. [Android App Build and Distribution](#7-android-app-build-and-distribution)
+8. [Networking, TLS, and Firewall](#8-networking-tls-and-firewall)
+9. [Production Hardening Checklist](#9-production-hardening-checklist)
+10. [Operations: Backups, Logs, Monitoring](#10-operations-backups-logs-monitoring)
+11. [Troubleshooting](#11-troubleshooting)
+12. [Release Procedure](#12-release-procedure)
+
+---
+
+## 1. Deployment Overview
+
+| Component | Dev | Production (recommended) |
+|-----------|-----|--------------------------|
+| Database | PostgreSQL 16 in Docker (host :5433) | Managed PostgreSQL 14+ with backups |
+| Backend | `tsx watch src/index.ts` (:3000) | `node dist/index.js` behind HTTPS proxy |
+| Dashboard | Served at `/demo.html` from API | Same-origin static, HTTPS |
+| Android app | Debug build via Metro | Signed release APK/AAB |
+| Dev/debug routes | Enabled | **Disabled** (`NODE_ENV=production`) |
+
+```mermaid
+graph TB
+    subgraph Prod["Production"]
+        PROXY[HTTPS reverse proxy<br/>nginx / Caddy] --> API[Node API dist/]
+        API --> DB[(Managed PostgreSQL)]
+        PROXY --- DASH[/demo.html static/]
+    end
+    APK[Signed Android app] -- HTTPS --> PROXY
+    PARENT[Parent browser] -- HTTPS --> PROXY
+```
+
+---
+
+## 2. Prerequisites
+
+| Tool | Version | Used for |
+|------|---------|----------|
+| Node.js | 18 or 20 | Backend runtime + build |
+| npm | 8+ | Package management |
+| PostgreSQL | 14+ (16 in Docker) | Data store |
+| Docker Desktop | latest | Local DB (optional in prod) |
+| Android Studio + SDK | API 29+ | App build |
+| Java (JDK) | 17 | Gradle |
+| Git | latest | Source control |
+
+---
+
+## 3. Environment Configuration
+
+### 3.1 Backend `.env`
+
+Copy `backend/.env.example` to `backend/.env` and edit:
+
+```env
+NODE_ENV=development                # set to "production" in prod (disables /dev + /debug)
+PORT=3000
+DATABASE_URL=postgresql://postgres:postgres@localhost:5433/pfe_parental_control
+JWT_SECRET=change-me-in-production-use-long-random-string
+JWT_ISSUER=pfe-parental-control
+LOG_LEVEL=info
+MISSION_RISK_COOLDOWN_MINUTES=2     # dev 2, prod 15
+```
+
+| Variable | Meaning | Production guidance |
+|----------|---------|---------------------|
+| `NODE_ENV` | Environment mode | **`production`** — removes dev token minting and debug image endpoints |
+| `PORT` | API port | Bind behind a reverse proxy |
+| `DATABASE_URL` | PostgreSQL DSN | Use managed DB credentials; require SSL |
+| `JWT_SECRET` | Token signing key | Long, random, secret-managed (not committed) |
+| `JWT_ISSUER` | Token issuer claim | Keep stable across restarts |
+| `LOG_LEVEL` | Log verbosity | `info` or `warn` |
+| `MISSION_RISK_COOLDOWN_MINUTES` | Risky-mission cooldown | **15** in production |
+
+> Never commit `.env`. It is already covered by `.gitignore`.
+
+### 3.2 Mobile `apiConfig.ts`
+
+`MobileApp/src/config/apiConfig.ts` selects the API base URL:
+
+```typescript
+export const DEV_LAN_HOST = '192.168.x.x';  // your PC's Wi-Fi IPv4 (ipconfig)
+```
+
+`getApiBaseUrl()` returns `10.0.2.2:3000` on emulators, `DEV_LAN_HOST:3000` on physical devices. For production, point this at your HTTPS domain and rebuild the app.
+
+---
+
+## 4. Database Setup and Migrations
+
+### 4.1 Docker (development)
+
+```bash
+cd backend
+npm run db:up          # PostgreSQL 16 on host port 5433
+npm run db:migrate     # apply all migrations 000..015
+```
+
+`docker-compose.yml` provisions `pfe-postgres` with a healthcheck and a named volume `pfe_pg_data`.
+
+### 4.2 Managed / local PostgreSQL (production)
+
+1. Create database `pfe_parental_control`.
+2. Set `DATABASE_URL` to the managed instance (with `sslmode=require` if applicable).
+3. Run migrations:
+
+```bash
+cd backend
+npm run db:migrate
+```
+
+The runner (`src/db/migrate.ts`) applies the SQL files in `src/db/migrations/` in lexical order. DDL is written with `IF NOT EXISTS` guards, so re-running is largely idempotent.
+
+> **Known limitation:** the runner applies **all** files; on a pre-existing database, verify state before running. There is no `004` (numbering skips it). See [architecture.md](architecture.md) §5.2 for the full migration inventory.
+
+### 4.3 Seed data
+
+`002_dev_seed.sql` inserts a demo parent and child used by `/api/dev/*` token minting. In production you would replace this with a real provisioning flow (out of scope for v1.0-final).
+
+---
+
+## 5. Backend Deployment
+
+### 5.1 Development
+
+```bash
+cd backend
+npm install
+npm run dev            # tsx watch, http://localhost:3000
+```
+
+### 5.2 Production build & run
+
+```bash
+cd backend
+npm ci
+npm run build          # tsc -> dist/
+NODE_ENV=production node dist/index.js
+```
+
+Recommended process management: run under a supervisor (systemd, PM2, or a container) with automatic restart. Example systemd unit:
+
+```ini
+[Unit]
+Description=SafeGuard API
+After=network.target
+
+[Service]
+WorkingDirectory=/opt/safeguard/backend
+Environment=NODE_ENV=production
+EnvironmentFile=/opt/safeguard/backend/.env
+ExecStart=/usr/bin/node dist/index.js
+Restart=always
+User=safeguard
+
+[Install]
+WantedBy=multi-user.target
+```
+
+The daily scoring cron is in-process (`node-cron`, 01:00 server-local). Ensure the server timezone matches your intended score-date boundary (scores use UTC date boundaries — see [scoring_formulas.md](scoring_formulas.md)).
+
+---
+
+## 6. Parent Dashboard Deployment
+
+The dashboard source is `demo_dashboard.html` (repo root). Sync it into the API's static folder and it is served at `/demo.html`:
+
+```bash
+cd backend
+npm run sync:demo      # copies demo_dashboard.html -> backend/public/demo.html
+```
+
+- Access: `https://<your-domain>/demo.html`.
+- Use the backend URL (not `file://`) so browser notifications work.
+- The dashboard authenticates with a parent JWT (from `/api/dev/parent-token` in dev). In production, wire it to a real login before exposing publicly.
+
+---
+
+## 7. Android App Build and Distribution
+
+### 7.1 Debug (development)
+
+```bash
+cd MobileApp
+npm install
+npm start              # Metro (:8081)
+npm run android        # build & install on device/emulator
+```
+
+### 7.2 Release build
+
+1. Configure a signing key in `android/` (keystore + `gradle.properties`).
+2. Set the production API host in `apiConfig.ts` and rebuild.
+3. Build the artifact:
+
+```bash
+cd MobileApp/android
+./gradlew assembleRelease     # APK
+# or
+./gradlew bundleRelease       # AAB for Play Store
+```
+
+Artifacts appear under `android/app/build/outputs/`.
+
+> **Rebuild triggers:** any change to native modules (`ScreenCaptureModule`, `ForegroundAppModule`, overlay) or the `nsfw.tflite` model requires a native rebuild (`npm run android` / gradle), not just a Metro reload.
+
+### 7.3 Required device permissions
+
+| Permission | Why | Without it |
+|------------|-----|-----------|
+| MediaProjection consent | Screen capture | No capture at all |
+| Foreground service notification | Android 14+ capture | Capture cannot run |
+| Usage Access (optional) | Accurate `app_package` | Falls back to ActivityManager (less accurate) |
+| Display over other apps | Mission overlay on third-party apps | Notification + in-app mission fallback |
+
+---
+
+## 8. Networking, TLS, and Firewall
+
+### 8.1 Development (LAN)
+
+- Phone and PC on the **same Wi-Fi**.
+- Allow inbound **TCP 3000** in the host firewall.
+- Verify from the phone browser: `http://<PC-IP>:3000/api/health` → `{"status":"ok"}`.
+
+### 8.2 Production
+
+- Terminate **HTTPS** at a reverse proxy (nginx/Caddy); proxy to the Node port.
+- Restrict database access to the app host; require SSL to the DB.
+- Set CORS to the dashboard origin only.
+
+Example nginx proxy:
+
+```nginx
+server {
+    listen 443 ssl;
+    server_name safeguard.example.com;
+    # ssl_certificate / ssl_certificate_key ...
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+```
+
+---
+
+## 9. Production Hardening Checklist
+
+- [ ] `NODE_ENV=production` (disables `/api/dev/*` and `/api/debug/*`).
+- [ ] Strong, secret-managed `JWT_SECRET`; rotate periodically.
+- [ ] `MISSION_RISK_COOLDOWN_MINUTES=15`.
+- [ ] HTTPS everywhere; HSTS at the proxy.
+- [ ] Managed PostgreSQL with automated backups + SSL.
+- [ ] Replace dev seed + dev tokens with real authentication and per-route parent–child ownership checks.
+- [ ] Restrict CORS to the dashboard origin.
+- [ ] App points at the HTTPS domain; signed release build.
+- [ ] Log shipping and uptime monitoring on `/api/health`.
+- [ ] Review privacy/consent copy and legal framing (GDPR/COPPA).
+
+> These items reflect the security/operations limitations documented in [PREFINAL_REPORT.md](PREFINAL_REPORT.md) §4.7; the shipped v1.0-final is a demo-grade deployment.
+
+---
+
+## 10. Operations: Backups, Logs, Monitoring
+
+| Concern | Approach |
+|---------|----------|
+| **Backups** | `pg_dump` on a schedule (or managed snapshots); test restores |
+| **Logs** | Backend emits structured JSON logs to stdout — ship to your aggregator |
+| **Health** | Poll `GET /api/health` for liveness |
+| **Cron** | Daily job logs `Daily score cron scheduled`; verify `daily_scores` rows appear after 01:00 |
+| **Metrics** | Track request errors, 401 rates, and mission generation reasons in logs |
+
+Manual cron re-run (dev): call `runDailyScoreJob()` from `backend/src/jobs/dailyScoreJob.ts`.
+
+---
+
+## 11. Troubleshooting
+
+| Symptom | Likely cause | Fix |
+|---------|--------------|-----|
+| Device "Network error" | Wrong `DEV_LAN_HOST`, firewall, different Wi-Fi | Fix host IP; open TCP 3000; same network |
+| `MediaProjection denied` | Consent not granted / manifest issue | Re-grant; ensure foreground service in manifest |
+| HTTP 400 on screen-events | Preview > 500 chars | Ensure preview truncated ≤ 500 |
+| `cooldown_active` / `pending_limit_reached`, no overlay | Pending/limit reached | Expected; overlay should re-surface. If not, restart backend; clear old pending missions |
+| Frames emit, no OCR / endless `OCR lock takeover` | Wedged foreground lookup | Self-heal added; reload JS or toggle monitoring |
+| Gradle / OneDrive file locks | Syncing `android/build` via OneDrive | Clean `.gradle`; exclude build dirs from sync |
+| Dev token 401 loop | Backend down during refresh | Keep API on :3000; token auto-refreshes |
+| Empty OCR | Low-contrast/blank screen | Use screens with clear, larger text |
+
+More detail in [README.md](../README.md) ("Common issues") and [architecture.md](architecture.md).
+
+---
+
+## 12. Release Procedure
+
+1. Ensure all tests pass: mobile `181/23`, backend `129/17` (see [testing_strategy.md](testing_strategy.md)).
+2. Update `README.md` and `docs/` as needed.
+3. Build backend (`npm run build`) and Android release artifact.
+4. Apply DB migrations to the target database.
+5. Deploy backend (`node dist/index.js`) behind HTTPS; sync dashboard.
+6. Smoke-test `GET /api/health` and one end-to-end capture → mission → approval.
+7. Tag the release (e.g. `git tag v1.0-final`).
+
+> Per project policy, commits/pushes/tags are performed **only when explicitly requested**.
+
+---
+
+*End of deployment guide — SafeGuard v1.0-final.*

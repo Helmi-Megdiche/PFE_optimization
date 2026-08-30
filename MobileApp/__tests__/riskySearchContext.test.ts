@@ -1,0 +1,131 @@
+import {
+  applyRiskySearchBoost,
+  hasExplicitAdultGoogleSearchIntent,
+  hasExplicitGoogleSearchIntent,
+  hasExplicitSearchBoxQuery,
+  hasMatchedKeywordInSearchBox,
+  isFilteredSearchResultsContext,
+  isRiskyWebSearchContext,
+  isRiskyViolentWebSearchContext,
+  shouldCapFilteredSearchResults,
+} from '../src/utils/riskySearchContext';
+import { keywordFilter } from '../src/utils/keywordFilter';
+
+describe('riskySearchContext', () => {
+  it('detects explicit google search queries in the search box on filtered SERP', () => {
+    const text = 'BASIC + Q nsfw Mode IA Tous Images google.com/sear';
+    expect(isRiskyWebSearchContext(text)).toBe(true);
+    const result = keywordFilter(text);
+    expect(result.riskFlag).toBe(true);
+    expect(result.category).toBe('adult');
+  });
+
+  it('does not treat body-only nsfw on Mode IA SERP as explicit search', () => {
+    const text = 'BASIC Mode IA Tous Images nsfw assir google.com/sear';
+    expect(isRiskyWebSearchContext(text)).toBe(false);
+    expect(shouldCapFilteredSearchResults(text, 4)).toBe(true);
+  });
+
+  it('does not boost Fiverr SafeSearch settings UI', () => {
+    const text = 'Fiverr SafeSearch Désactiver nsfw Dessiner un personnage';
+    expect(isRiskyWebSearchContext(text)).toBe(false);
+    const result = keywordFilter(text);
+    expect(result.riskFlag).toBe(false);
+  });
+
+  it('does not flag Fiverr character-design gigs on Google search (nsfw filter label)', () => {
+    const text =
+      '8:470 G BASIC Dessiner un personnage teNeues nsfw 25 google.com/sear STANDARD EXCLUSIVE';
+    expect(isRiskyWebSearchContext(text)).toBe(true);
+    const result = keywordFilter(text);
+    expect(result.riskFlag).toBe(false);
+    expect(result.category).toBe('neutral');
+  });
+
+  it('does not boost censored Google search filter UI', () => {
+    const text = '7:28O hssi 25 google.com/sear Instagram CENSORED SJ0';
+    expect(isRiskyWebSearchContext(text)).toBe(false);
+    expect(keywordFilter(text).riskFlag).toBe(false);
+  });
+
+  it('boosts violent google image search when gore is in the search box', () => {
+    const text = 'Mode IA Tous Images + Q gore google.com/sear blood results';
+    expect(isRiskyViolentWebSearchContext(text)).toBe(true);
+    const result = keywordFilter(text);
+    expect(result.riskFlag).toBe(true);
+    expect(result.category).toBe('violent');
+    expect(result.matchedKeywords).toContain('gore');
+  });
+
+  it('caps Mode IA SERP when body has porn keywords but search box does not', () => {
+    const text =
+      '14:00 google.com/sear Mode IA Tous Images youporn porno streaming titles';
+    expect(isFilteredSearchResultsContext(text.toLowerCase())).toBe(true);
+    expect(hasExplicitSearchBoxQuery(text)).toBe(false);
+    expect(shouldCapFilteredSearchResults(text, 4)).toBe(true);
+  });
+
+  it('does not cap Mode IA SERP when keyword-filter hit is in the search box (Q zebi)', () => {
+    const text =
+      'A3 google.com/sea + (10) Q zebi Mode IA Tous Images Aperçu IA Google Ol 92%';
+    const matched = keywordFilter(text);
+    expect(matched.matchedKeywords.map((k) => k.toLowerCase())).toEqual(
+      expect.arrayContaining(['zebi']),
+    );
+    expect(hasMatchedKeywordInSearchBox(text, matched.matchedKeywords)).toBe(true);
+    expect(
+      shouldCapFilteredSearchResults(text, 2, { matchedKeywords: matched.matchedKeywords }),
+    ).toBe(false);
+  });
+
+  it('still caps Mode IA SERP when matched keyword is only in result body titles', () => {
+    const text =
+      '14:00 google.com/sear Mode IA Tous Images youporn porno streaming titles';
+    const matched = keywordFilter(text);
+    expect(hasMatchedKeywordInSearchBox(text, matched.matchedKeywords)).toBe(false);
+    expect(
+      shouldCapFilteredSearchResults(text, 4, { matchedKeywords: matched.matchedKeywords }),
+    ).toBe(true);
+  });
+
+  it('does not cap filtered SERP when search box has explicit Q porn query', () => {
+    const text = 'google.com/sear + Q porn Mode IA Flouter censored results';
+    expect(hasExplicitSearchBoxQuery(text)).toBe(true);
+    expect(shouldCapFilteredSearchResults(text, 4)).toBe(false);
+  });
+
+  it('does not flag stale q=gore on Mode lA google.com/sea OCR without search-box query', () => {
+    const text =
+      'Di 25 google.com/sea Mode lA Tous Images Spread Kindness memb search?q=gore+images padding';
+    expect(isFilteredSearchResultsContext(text.toLowerCase())).toBe(true);
+    expect(hasExplicitSearchBoxQuery(text)).toBe(false);
+    expect(shouldCapFilteredSearchResults(text, 2)).toBe(true);
+    const result = keywordFilter(text);
+    expect(result.riskFlag).toBe(false);
+    expect(result.category).toBe('neutral');
+  });
+
+  it('detects omnibar OCR "NSFW eo google.com/sea" as explicit search intent', () => {
+    const text =
+      "NSFW eo google.com/sea + Dessiner de l'art nsfw d... BASIC STANDARD EXCLUSIVE";
+    expect(hasExplicitAdultGoogleSearchIntent(text)).toBe(true);
+    const result = keywordFilter(text);
+    expect(result.riskFlag).toBe(true);
+    expect(result.category).toBe('adult');
+  });
+
+  it('detects "google.com/sea Q nsfw" as explicit search intent', () => {
+    const text = 'De Fiv . 26 google.com/sea Q nsfw Google results page';
+    expect(hasExplicitAdultGoogleSearchIntent(text)).toBe(true);
+    expect(keywordFilter(text).category).toBe('adult');
+  });
+
+  it('applyRiskySearchBoost forces adult when search context matches', () => {
+    const boosted = applyRiskySearchBoost(
+      'google.com/search?q=nsfw',
+      { riskFlag: false, category: 'neutral', matchedKeywords: [] },
+    );
+    expect(boosted.category).toBe('adult');
+    expect(boosted.matchedKeywords).toContain('nsfw');
+  });
+});

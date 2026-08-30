@@ -1,0 +1,42 @@
+import { Router } from 'express';
+import { env } from '../config/env';
+import { verifyToken } from '../middleware/verifyToken';
+import screenEventsRoutes from './screenEvents.routes';
+import usageRoutes from './usage.routes';
+import scoresRoutes from './scores.routes';
+import missionsRoutes from './missions.routes';
+import rewardsRoutes from './rewards.routes';
+import badgesRoutes from './badges.routes';
+import bonusRoutes from './bonus.routes';
+import customMissionsRoutes from './customMissions.routes';
+import childRoutes from './child.routes';
+import devRoutes from './dev.routes';
+import debugRoutes from './debug.routes';
+
+const router = Router();
+
+/** Public — no JWT (load balancer / monitoring). */
+router.get('/health', (_req, res) => {
+  res.json({ status: 'ok' });
+});
+
+/** Development helpers (JWT minting) — disabled in production. */
+if (!env.isProduction) {
+  router.use('/dev', devRoutes);
+  router.use('/debug', debugRoutes);
+}
+
+/** All routes below require `Authorization: Bearer <JWT>`. */
+router.use(verifyToken);
+
+router.use('/screen-events', screenEventsRoutes);
+router.use('/usage', usageRoutes);
+router.use('/scores', scoresRoutes);
+router.use('/missions', missionsRoutes);
+router.use('/rewards', rewardsRoutes);
+router.use('/badges', badgesRoutes);
+router.use('/bonus', bonusRoutes);
+router.use('/custom-missions', customMissionsRoutes);
+router.use('/child', childRoutes);
+
+export default router;

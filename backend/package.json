@@ -1,0 +1,51 @@
+{
+  "name": "pfe-parental-control-api",
+  "version": "1.0.0",
+  "private": true,
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.app.json",
+    "start": "node dist/index.js",
+    "dev": "tsx watch src/index.ts",
+    "db:up": "docker compose up -d",
+    "db:down": "docker compose down",
+    "db:migrate": "tsx src/db/migrate.ts",
+    "db:setup": "npm run db:up && npm run db:migrate",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "smoke:missions": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/smoke-missions.ps1",
+    "smoke:sprint58": "tsx scripts/smoke-sprint58.ts",
+    "test:sprint59": "tsx scripts/test-sprint59.ts",
+    "sync:demo": "node scripts/sync-demo.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "helmet": "^8.0.0",
+    "joi": "^17.13.3",
+    "jsonwebtoken": "^9.0.2",
+    "node-cron": "^3.0.3",
+    "@tensorflow/tfjs": "^4.22.0",
+    "@tensorflow/tfjs-backend-cpu": "^4.22.0",
+    "jimp": "^0.22.12",
+    "multer": "^1.4.5-lts.1",
+    "nsfwjs": "^4.2.1",
+    "tesseract.js": "^5.1.1",
+    "pg": "^8.13.1"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/jsonwebtoken": "^9.0.7",
+    "@types/jest": "^29.5.14",
+    "@types/multer": "^1.4.12",
+    "@types/node": "^22.10.2",
+    "@types/node-cron": "^3.0.11",
+    "@types/pg": "^8.11.10",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.2.5",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}
