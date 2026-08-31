@@ -1,22 +1,13 @@
 import React, { useState } from 'react';
-import { StyleSheet, View } from 'react-native';
-import { NsfwDebugPanel } from '../components/NsfwDebugPanel';
 import { ScreenMonitor } from '../components/ScreenMonitor';
+import { Screen } from '../components/ui';
 
 export function MonitorScreen(): React.JSX.Element {
   const [consentGranted] = useState(true);
 
   return (
-    <View style={styles.container}>
+    <Screen>
       <ScreenMonitor consentGranted={consentGranted} intervalMs={20000} />
-      {__DEV__ ? <NsfwDebugPanel /> : null}
-    </View>
+    </Screen>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#fff',
-  },
-});

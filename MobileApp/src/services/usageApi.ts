@@ -15,6 +15,13 @@ export interface PostUsageResponse {
 export function postUsageSessions(
   sessions: UsageSessionPayload[],
 ): Promise<PostUsageResponse> {
+  // The backend rejects an empty batch (400 "sessions" must contain at least 1
+  // items). Concurrent flushes on teardown can each pass a caller-side length
+  // check and then race to drain the queue, leaving one with []. Guard the send
+  // itself so no caller can trigger that request.
+  if (sessions.length === 0) {
+    return Promise.resolve({count: 0});
+  }
   return api.post<PostUsageResponse>('/usage', {sessions});
 }
 

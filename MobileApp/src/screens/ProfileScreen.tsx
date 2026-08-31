@@ -1,17 +1,21 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import {
-  ActivityIndicator,
-  Alert,
-  Pressable,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { ActivityIndicator, Alert, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { requestAuthSessionRefresh } from '../auth/authSession';
 import { tokenStorage } from '../auth/tokenStorage';
 import { useChildId } from '../auth/useChildId';
 import { getChildPoints } from '../services/missionsApi';
+import {
+  AppText,
+  Button,
+  Card,
+  Meter,
+  Screen,
+  SectionLabel,
+} from '../components/ui';
+import { colors, spacing, type as typeScale } from '../theme';
+
+const LEVEL_SIZE = 500;
 
 export function ProfileScreen(): React.JSX.Element {
   const { childId, refresh: refreshChildId } = useChildId();
@@ -71,54 +75,86 @@ export function ProfileScreen(): React.JSX.Element {
     }
   };
 
+  const pts = points ?? 0;
+  const level = Math.floor(pts / LEVEL_SIZE) + 1;
+  const intoLevel = pts % LEVEL_SIZE;
+
   return (
-    <View style={styles.container}>
-      <Text style={styles.label}>Child ID</Text>
-      <Text style={styles.value}>{childId ?? '—'}</Text>
-      <Text style={styles.label}>Total points</Text>
-      {loading ? (
-        <ActivityIndicator />
-      ) : (
-        <>
-          <Text style={styles.points}>{points ?? 0}</Text>
-          <Text style={styles.level}>
-            Level {Math.floor((points ?? 0) / 500) + 1}
+    <Screen contentStyle={styles.content}>
+      {/* Level hero */}
+      <Card style={styles.hero}>
+        <View style={styles.levelRow}>
+          <View style={styles.avatar}>
+            <Text style={styles.avatarText}>{level}</Text>
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={[typeScale.eyebrow, { color: colors.tealBorder }]}>Level {level}</Text>
+            {loading ? (
+              <ActivityIndicator color="#FFFFFF" style={{ alignSelf: 'flex-start', marginTop: 6 }} />
+            ) : (
+              <View style={styles.ptsRow}>
+                <Text style={styles.ptsNum}>{pts}</Text>
+                <Text style={styles.ptsUnit}>points</Text>
+              </View>
+            )}
+          </View>
+        </View>
+        <View style={styles.levelMeter}>
+          <Meter value={intoLevel} max={LEVEL_SIZE} tone="sage" height={10} />
+          <Text style={styles.levelHint}>
+            {LEVEL_SIZE - intoLevel} points to level {level + 1}
           </Text>
-        </>
-      )}
-      <Text style={styles.hint}>
-        Points refresh when you open this screen or the Missions tab (pull-to-refresh). Parent
-        approval is not pushed in real time.
-      </Text>
-      <Pressable style={styles.btn} onPress={() => void load()}>
-        <Text style={styles.btnText}>Refresh points</Text>
-      </Pressable>
-      <Pressable
-        style={[styles.btn, styles.btnLogout]}
-        disabled={loggingOut}
-        onPress={() => void onLogout()}>
-        <Text style={styles.btnText}>
-          {loggingOut ? 'Logging out…' : __DEV__ ? 'Log out / refresh JWT' : 'Log out'}
-        </Text>
-      </Pressable>
-    </View>
+        </View>
+      </Card>
+
+      <SectionLabel>Account</SectionLabel>
+      <Card>
+        <View style={styles.kv}>
+          <AppText variant="bodyStrong">Child ID</AppText>
+          <Text style={styles.mono} numberOfLines={1}>
+            {childId ?? '—'}
+          </Text>
+        </View>
+      </Card>
+
+      <AppText variant="meta">
+        Points refresh when you open this screen or the Missions tab. Parent approval isn't
+        pushed in real time.
+      </AppText>
+
+      <View style={styles.actions}>
+        <Button label="Refresh points" variant="secondary" onPress={() => void load()} />
+        <Button
+          label={__DEV__ ? 'Log out / refresh JWT' : 'Log out'}
+          busyLabel="Logging out…"
+          loading={loggingOut}
+          variant="danger"
+          onPress={() => void onLogout()}
+        />
+      </View>
+    </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: 24, backgroundColor: '#fff' },
-  label: { fontSize: 12, color: '#64748b', marginTop: 16 },
-  value: { fontSize: 13, color: '#0f172a', fontFamily: 'monospace' },
-  points: { fontSize: 32, fontWeight: '700', color: '#2563eb', marginTop: 4 },
-  level: { fontSize: 18, fontWeight: '600', color: '#0f172a', marginTop: 8 },
-  hint: { fontSize: 13, color: '#64748b', marginTop: 20, lineHeight: 20 },
-  btn: {
-    marginTop: 24,
-    backgroundColor: '#2563eb',
-    paddingVertical: 12,
-    borderRadius: 8,
+  content: { gap: spacing.lg },
+  hero: { backgroundColor: colors.ink, borderColor: colors.ink, gap: spacing.lg },
+  levelRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.lg },
+  avatar: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: colors.teal,
     alignItems: 'center',
+    justifyContent: 'center',
   },
-  btnLogout: { backgroundColor: '#b91c1c', marginTop: 12 },
-  btnText: { color: '#fff', fontWeight: '600' },
+  avatarText: { fontSize: 28, fontWeight: '800', color: '#FFFFFF' },
+  ptsRow: { flexDirection: 'row', alignItems: 'baseline', gap: 6, marginTop: 2 },
+  ptsNum: { fontSize: 34, fontWeight: '800', color: '#FFFFFF', letterSpacing: -1 },
+  ptsUnit: { fontSize: 14, fontWeight: '700', color: colors.tealBorder },
+  levelMeter: { gap: 6 },
+  levelHint: { ...typeScale.meta, color: colors.tealBorder },
+  kv: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  mono: { fontFamily: 'monospace', fontSize: 13, color: colors.textMuted, flexShrink: 1, marginLeft: spacing.md },
+  actions: { gap: spacing.md, marginTop: spacing.sm },
 });

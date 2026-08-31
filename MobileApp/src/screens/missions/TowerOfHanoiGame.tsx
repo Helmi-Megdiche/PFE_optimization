@@ -10,6 +10,7 @@ import {
 } from '../../missions/games/gameLogic';
 import { recordGameResult } from '../../missions/games/gameStats';
 import type { GameProps } from './gameTypes';
+import { focus } from '../../theme';
 
 export function TowerOfHanoiGame({ metadata, onComplete }: GameProps): React.JSX.Element {
   const disks = Math.max(2, Math.min(4, Number(metadata.disks ?? 3)));
@@ -84,18 +85,18 @@ export function TowerOfHanoiGame({ metadata, onComplete }: GameProps): React.JSX
   );
 }
 
-const DISK_COLORS = ['#60a5fa', '#f59e0b', '#34d399', '#f472b6'];
+const DISK_COLORS = focus.disks;
 
 const styles = StyleSheet.create({
   wrap: { alignItems: 'center' },
-  title: { color: '#fff', fontSize: 22, fontWeight: '700' },
-  sub: { color: '#94a3b8', marginTop: 6, textAlign: 'center', paddingHorizontal: 16 },
-  moves: { color: '#fbbf24', marginTop: 12, fontWeight: '600' },
+  title: { color: focus.text, fontSize: 22, fontWeight: '800' },
+  sub: { color: focus.textMuted, marginTop: 6, textAlign: 'center', paddingHorizontal: 16 },
+  moves: { color: focus.amber, marginTop: 12, fontWeight: '700' },
   board: { flexDirection: 'row', marginTop: 24, height: 220, alignItems: 'flex-end' },
   pegCol: { flex: 1, alignItems: 'center', justifyContent: 'flex-end' },
   diskStack: { alignItems: 'center', justifyContent: 'flex-end', flex: 1 },
   disk: { height: 22, borderRadius: 6, marginVertical: 2 },
-  peg: { width: 8, height: 12, backgroundColor: '#475569', borderRadius: 2 },
-  pegSelected: { backgroundColor: '#60a5fa' },
-  pegLabel: { color: '#94a3b8', marginTop: 6, fontSize: 12 },
+  peg: { width: 8, height: 12, backgroundColor: focus.border, borderRadius: 2 },
+  pegSelected: { backgroundColor: focus.accent },
+  pegLabel: { color: focus.textMuted, marginTop: 6, fontSize: 12 },
 });

@@ -1,18 +1,21 @@
 import React, { useCallback, useState } from 'react';
-import {
-  ActivityIndicator,
-  Alert,
-  Pressable,
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { Alert, RefreshControl, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { useChildId } from '../auth/useChildId';
 import { getChildPoints } from '../services/missionsApi';
 import { claimReward, listRewards, type RewardDto } from '../services/rewardsApi';
+import {
+  AppText,
+  Button,
+  Card,
+  EmptyState,
+  Loader,
+  Meter,
+  Pill,
+  Screen,
+  SectionLabel,
+} from '../components/ui';
+import { colors, spacing, type as typeScale } from '../theme';
 
 export function RewardsStoreScreen(): React.JSX.Element {
   const { childId } = useChildId();
@@ -55,61 +58,86 @@ export function RewardsStoreScreen(): React.JSX.Element {
   };
 
   if (loading) {
-    return (
-      <View style={styles.centered}>
-        <ActivityIndicator size="large" />
-      </View>
-    );
+    return <Loader />;
   }
 
   return (
-    <ScrollView
-      style={styles.container}
+    <Screen
+      contentStyle={styles.content}
       refreshControl={
-        <RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); void load(); }} />
+        <RefreshControl
+          refreshing={refreshing}
+          onRefresh={() => {
+            setRefreshing(true);
+            void load();
+          }}
+          tintColor={colors.teal}
+        />
       }>
-      <Text style={styles.points}>Your points: {points}</Text>
-      {rewards.map((r) => (
-        <View key={r.id} style={styles.card}>
-          <Text style={styles.title}>{r.title}</Text>
-          <Text style={styles.desc}>{r.description}</Text>
-          <Text style={styles.cost}>{r.pointsRequired} points</Text>
-          <Pressable
-            style={[styles.btn, points < r.pointsRequired && styles.btnDisabled]}
-            disabled={points < r.pointsRequired}
-            onPress={() => void onClaim(r)}>
-            <Text style={styles.btnText}>Claim</Text>
-          </Pressable>
+      {/* Balance */}
+      <Card style={styles.balance}>
+        <Text style={[typeScale.eyebrow, { color: colors.tealBorder }]}>Your balance</Text>
+        <View style={styles.balanceRow}>
+          <Text style={styles.balanceNum}>{points}</Text>
+          <Text style={styles.balanceUnit}>points</Text>
         </View>
-      ))}
-      {!rewards.length ? <Text style={styles.empty}>No rewards available.</Text> : null}
-    </ScrollView>
+      </Card>
+
+      <SectionLabel>Rewards store</SectionLabel>
+
+      {rewards.map((r) => {
+        const affordable = points >= r.pointsRequired;
+        return (
+          <Card key={r.id} style={styles.card}>
+            <View style={styles.cardHead}>
+              <AppText variant="cardTitle" style={{ flex: 1 }}>
+                {r.title}
+              </AppText>
+              <Pill label={`${r.pointsRequired} pts`} tone={affordable ? 'sage' : 'neutral'} />
+            </View>
+            {r.description ? (
+              <AppText variant="body" style={{ marginTop: 4 }}>
+                {r.description}
+              </AppText>
+            ) : null}
+            {!affordable ? (
+              <View style={styles.progress}>
+                <Meter value={points} max={r.pointsRequired} tone="teal" height={8} />
+                <Text style={styles.progressText}>
+                  {r.pointsRequired - points} points to go
+                </Text>
+              </View>
+            ) : null}
+            <Button
+              label={affordable ? 'Claim reward' : 'Keep earning'}
+              variant={affordable ? 'primary' : 'secondary'}
+              disabled={!affordable}
+              onPress={() => void onClaim(r)}
+              style={{ marginTop: spacing.lg }}
+            />
+          </Card>
+        );
+      })}
+
+      {!rewards.length ? (
+        <EmptyState
+          icon="🎁"
+          title="No rewards yet"
+          message="Your parent can add rewards you unlock with points."
+        />
+      ) : null}
+    </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f8fafc', padding: 16 },
-  centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  points: { fontSize: 18, fontWeight: '700', marginBottom: 16, color: '#0f172a' },
-  card: {
-    backgroundColor: '#fff',
-    borderRadius: 10,
-    padding: 14,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
-  },
-  title: { fontSize: 16, fontWeight: '600' },
-  desc: { fontSize: 13, color: '#64748b', marginTop: 4 },
-  cost: { fontSize: 14, color: '#2563eb', marginTop: 8 },
-  btn: {
-    marginTop: 10,
-    backgroundColor: '#2563eb',
-    paddingVertical: 10,
-    borderRadius: 8,
-    alignItems: 'center',
-  },
-  btnDisabled: { backgroundColor: '#94a3b8' },
-  btnText: { color: '#fff', fontWeight: '600' },
-  empty: { textAlign: 'center', color: '#94a3b8', marginTop: 24 },
+  content: { gap: spacing.lg },
+  balance: { backgroundColor: colors.ink, borderColor: colors.ink },
+  balanceRow: { flexDirection: 'row', alignItems: 'baseline', gap: spacing.sm, marginTop: 6 },
+  balanceNum: { fontSize: 44, fontWeight: '800', color: '#FFFFFF', letterSpacing: -1.5 },
+  balanceUnit: { fontSize: 15, fontWeight: '700', color: colors.tealBorder },
+  card: { gap: 2 },
+  cardHead: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
+  progress: { marginTop: spacing.md, gap: 6 },
+  progressText: { ...typeScale.meta, color: colors.textMuted },
 });

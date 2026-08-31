@@ -13,4 +13,5 @@
     <string name="overlay_service_notification_text">Blocking overlay is shown</string>
     <string name="mission_notification_channel_name">Missions</string>
     <string name="mission_notification_title">New mission</string>
+    <string name="accessibility_service_description">SafeGuard uses this to detect which app is open and when a website is visited, so it can keep monitoring safe and use less battery.</string>
 </resources>

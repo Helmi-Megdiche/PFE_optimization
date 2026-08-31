@@ -1,17 +1,12 @@
 import React, { useCallback, useState } from 'react';
-import {
-  ActivityIndicator,
-  Platform,
-  Pressable,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { Platform, StyleSheet, Text, View } from 'react-native';
 import { classifyImage } from '../services/imageClassifier';
 import { initModel } from '../services/nsfwClassifier';
 import { getLastCapturePath } from '../utils/lastCapturePath';
 import { scLog } from '../utils/screenCaptureLogger';
 import { toMlKitImageUri } from '../utils/imageUri';
+import { Button, Card, SectionLabel } from './ui';
+import { colors, spacing } from '../theme';
 
 /**
  * Debug panel: classify the latest screen-capture JPEG via TFLite NSFW.
@@ -47,7 +42,7 @@ export function NsfwDebugPanel() {
         `adult=${(details?.adultScore ?? 0).toFixed(2)}`,
         `tflite=[${(details?.tfliteOutputs ?? []).map((n) => n.toFixed(2)).join(', ')}]`,
       ].join(' ');
-      scLog('[NSFW Debug]', result);
+      scLog('[NSFW Debug]', result as unknown as Record<string, unknown>);
       setStatus(line);
     } catch (err) {
       setStatus(`Error: ${String(err)}`);
@@ -57,38 +52,30 @@ export function NsfwDebugPanel() {
   }, []);
 
   return (
-    <View style={styles.box}>
-      <Text style={styles.title}>NSFW TFLite debug</Text>
-      <Pressable style={styles.btn} onPress={runTest} disabled={loading}>
-        {loading ? (
-          <ActivityIndicator color="#fff" />
-        ) : (
-          <Text style={styles.btnText}>Classify last capture</Text>
-        )}
-      </Pressable>
-      <Text style={styles.status}>{status}</Text>
+    <View style={{ gap: spacing.md }}>
+      <SectionLabel>Developer · NSFW TFLite</SectionLabel>
+      <Card>
+        <Button
+          label="Classify last capture"
+          busyLabel="Classifying…"
+          loading={loading}
+          variant="secondary"
+          onPress={runTest}
+        />
+        <View style={styles.statusBox}>
+          <Text style={styles.status}>{status}</Text>
+        </View>
+      </Card>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  box: {
-    margin: 12,
-    padding: 12,
-    borderRadius: 8,
-    backgroundColor: '#f1f5f9',
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
+  statusBox: {
+    marginTop: spacing.md,
+    backgroundColor: colors.surfaceAlt,
+    borderRadius: 12,
+    padding: spacing.md,
   },
-  title: { fontSize: 14, fontWeight: '600', marginBottom: 8, color: '#334155' },
-  btn: {
-    backgroundColor: '#2563eb',
-    padding: 10,
-    borderRadius: 6,
-    alignItems: 'center',
-    minHeight: 40,
-    justifyContent: 'center',
-  },
-  btnText: { color: '#fff', fontWeight: '600' },
-  status: { marginTop: 8, fontSize: 12, color: '#475569' },
+  status: { fontFamily: 'monospace', fontSize: 12, color: colors.textMuted, lineHeight: 18 },
 });

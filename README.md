@@ -107,9 +107,10 @@ Sprint **3.7** replaces a fixed periodic interval with a **risk-based adaptive s
 
 | Trigger | When it fires |
 |---------|----------------|
-| **App switch** | `AppState` background (leaving SafeGuard) + UsageStats poll every 1s when another app is foreground → `captureNow()`; baseline `com.mobileapp` while SafeGuard is active (UsageStats omits own package) |
+| **App switch** | **Accessibility window events** when the SafeGuard accessibility service is connected (near-instant); otherwise the fallback **UsageStats poll every 1s** when another app is foreground → `captureNow()`. Also on `AppState` background (leaving SafeGuard). Baseline `com.mobileapp` while SafeGuard is active (UsageStats omits own package) |
 | **Follow-up** | 5 seconds after app switch, unless a capture completed within the last 2 seconds |
 | **Periodic (adaptive)** | Rolling average of the last **3** `combinedRiskScore` values sets the interval |
+| **Keyboard suppression** | While the soft keyboard is visible (accessibility keyboard event), routine periodic re-scans are paused; app switches and risk follow-ups still capture |
 
 | Average risk (last 3 captures) | Periodic interval (risk base) |
 |--------------------------------|-------------------|
@@ -143,9 +144,15 @@ The native `startCapture(20s)` loop is the real driver while the child is in **a
 
 **Background foreground-lookup self-heal:** while the child is in another app, RN often **freezes JS `setTimeout`/`setInterval`**, so timer-based `withTimeout` guards cannot abort a hung UsageStats IPC. A wedged single-flight promise used to poison every later frame (`OCR lock takeover` forever, no OCR / no missions). `ForegroundApp.ts` now **abandons stale in-flight lookups** (`isForegroundLookupStuck` after **2.5s** wall-clock), and `useScreenshotCapture` **skips awaiting** a wedged lookup — attributes `unknown` for that frame, kicks a fresh lookup, and continues OCR/risk so detection never blocks on attribution. `stopMonitoring` calls `resetForegroundLookup()`.
 
+**Accessibility-driven app-switch capture:** on device the 1s UsageStats poll can go blind for minutes (`Foreground cache stale — live lookup failed`), producing **zero** app-switch captures. When the child enables the **SafeGuard accessibility service** (Settings → Accessibility), `SafeGuardAccessibilityService` window events drive app-switch captures directly — a screenshot fires the instant the foreground package changes instead of up to a second later. `useAccessibilityEvents` (mounted in `useScreenshotCapture`) reports `{ connected }`; while it is *driving* (connected **and** a window event seen within `A11Y_STALE_MS` = **60s**), the poll's own `triggerAppSwitchCapture` calls are suppressed but the poll keeps running for its foreground-cache writes (OCR attribution depends on them; the accessibility handler mirrors the same `lastAppPackageRef` writes before it triggers). If the service is off, or connected but silent for 60s (crashed/unbound), the poll is the **unchanged fallback** — behaviour is byte-for-byte what it was before.
+
+The raw window-event feed is noisy, so `MobileApp/src/capture/windowEventFilter.ts` (pure, injected clock, unit-tested) collapses it: `createWindowEventFilter().accept(pkg)` rejects **`OWN_PACKAGE`** (SafeGuard's own window) → **`IME`** (`isImePackage` heuristic — `inputmethod`/`latin`/`swiftkey`/`gboard`/`.ime` substrings + exact `com.google.android.inputmethod.latin`, which fires ~14ms *before* the keyboard event) → **`SAME_PACKAGE`** → **`LAUNCHER_SETTLING`** (within `LAUNCHER_SETTLE_MS` = **1500ms** of the last accepted change when either side is a launcher surface — treats `com.google.android.googlequicksearchbox` as a launcher alongside `isLauncherPackage`, so the `com.miui.home ↔ googlequicksearchbox` flap on the launcher's `-1` screen yields **one** capture, not four). The filter is `reset()` on every monitoring start **and** stop.
+
+**Keyboard suppression:** `onAccessibilityKeyboardChanged` calls `coordinator.setKeyboardVisible(bool)`. While true, `requestCapture` drops **only** the four routine reasons `PERIODIC_ADAPTIVE`, `PERIODIC_FALLBACK`, `CONTENT_CHANGE`, `SCROLL_SETTLED` (returns `KEYBOARD_SUPPRESSED`); every app-switch reason, `BROWSER_NAVIGATION`, `RISK_FOLLOW_UP` and `APP_SWITCH_FOLLOW_UP` still pass — safety monitoring never stops while the child is typing, only routine screenshotting. `isKeyboardSuppressibleReason` (in `captureCoordinator.ts`) is the single source of that list. The latch is force-cleared on accessibility disconnect and on `stopMonitoring` so a dead service with the keyboard open cannot suppress captures forever. No capture is fired on keyboard-close in this iteration. `onAccessibilityScroll` stays **log-only**. **Privacy:** package names and booleans only — no `AccessibilityNodeInfo` content, node text, URLs, or field values are read.
+
 **Debounce:** at least **5 seconds** between any two captures (JS + native `captureNow`). Very fast app switches within that window may delay the frame until the follow-up or periodic timer fires (~5–20s). **Blank/loading Chrome tabs** (empty page, still loading, Incognito/DRM) often produce neutral scores with Sky/Space ML Kit labels — wait for the page to load before switching away. **UX:** no extra popups beyond MediaProjection and the foreground-service notification; Usage access is optional but improves `appPackage` / `appLabel` accuracy.
 
-Implementation: `MobileApp/src/hooks/useScreenshotCapture.ts`, `MobileApp/src/utils/adaptiveCapture.ts`, `MobileApp/src/utils/appCapturePolicy.ts`, `MobileApp/src/native/ForegroundApp.ts`, native `ForegroundAppModule` (UsageStats) and `ScreenCaptureModule.captureNow()`. At capture time, `resolveForegroundAppWithRetry()` queries UsageStats (UsageEvents window **120s**, `queryUsageStats` fallback limited to apps used in the last **5s**). If live lookup fails, the 1s poll cache is used only when younger than **30s**; `com.android.systemui` and launcher packages are never reported. **Rebuild required** after native `ForegroundAppModule.java` changes.
+Implementation: `MobileApp/src/hooks/useScreenshotCapture.ts`, `MobileApp/src/capture/captureCoordinator.ts`, `MobileApp/src/capture/windowEventFilter.ts`, `MobileApp/src/hooks/useAccessibilityEvents.ts`, `MobileApp/src/native/SafeGuardAccessibility.ts`, `MobileApp/src/utils/adaptiveCapture.ts`, `MobileApp/src/utils/appCapturePolicy.ts`, `MobileApp/src/native/ForegroundApp.ts`, native `ForegroundAppModule` (UsageStats), `SafeGuardAccessibilityService` (window/IME/scroll events) and `ScreenCaptureModule.captureNow()`. At capture time, `resolveForegroundAppWithRetry()` queries UsageStats (UsageEvents window **120s**, `queryUsageStats` fallback limited to apps used in the last **5s**). If live lookup fails, the 1s poll cache is used only when younger than **30s**; `com.android.systemui` and launcher packages are never reported. **Rebuild required** after native `ForegroundAppModule.java` / `SafeGuardAccessibilityService` changes. Pure logic (`captureCoordinator`, `windowEventFilter`) is unit-tested — `__tests__/captureCoordinator.test.ts`, `__tests__/windowEventFilter.test.ts`.
 
 ---
 
@@ -181,15 +188,17 @@ PFE/
 ├── MobileApp/                     # Primary React Native app (use this)
 │   ├── android/
 │   │   └── app/src/main/java/com/mobileapp/
-│   │       ├── screencapture/     # ScreenCaptureModule, Package
+│   │       ├── screencapture/     # ScreenCaptureModule, FrameHasher (dHash gate), Package
 │   │       ├── overlay/           # OverlayService, OverlayMissionModule (Sprint 5)
+│   │       ├── accessibility/     # SafeGuardAccessibilityService, EventBridge, Module, Package
 │   │       └── MediaProjectionForegroundService.java
 │   ├── src/
 │   │   ├── navigation/            # React Navigation tabs + MissionScreen stack
 │   │   ├── screens/               # Monitor, Missions, Rewards, Badges, Profile
 │   │   ├── missions/              # presentMissionFromCapture, missionCompletion
-│   │   ├── native/OverlayMission.ts
-│   │   ├── hooks/useScreenshotCapture.ts, useMissionOverlayListener.ts
+│   │   ├── capture/               # captureCoordinator, windowEventFilter (pure, unit-tested)
+│   │   ├── native/                # OverlayMission.ts, ScreenCapture.ts, SafeGuardAccessibility.ts
+│   │   ├── hooks/                 # useScreenshotCapture.ts, useAccessibilityEvents.ts, useMissionOverlayListener.ts
 │   │   ├── services/              # apiClient, missionsApi, screenEventsApi
 │   │   ├── config/apiConfig.ts
 │   │   └── utils/keywordFilter.ts
@@ -854,7 +863,7 @@ Artefacts under `docs/`:
 | [`scoring_formulas.md`](docs/scoring_formulas.md) | Per-capture risk + addiction/wellbeing scoring definitions | **Available** |
 | [`SRS.md`](docs/SRS.md) | Software requirements (functional, non-functional, traceability) | **Available** |
 | [`architecture.md`](docs/architecture.md) | Component, data-model, runtime, and deployment views + ADRs | **Available** |
-| [`testing_strategy.md`](docs/testing_strategy.md) | Unit, integration/smoke, and manual device test plans (310 tests) | **Available** |
+| [`testing_strategy.md`](docs/testing_strategy.md) | Unit, integration/smoke, and manual device test plans (380 tests) | **Available** |
 | [`deployment.md`](docs/deployment.md) | Dev + production deployment guide | **Available** |
 | [`scrum_artifacts.md`](docs/scrum_artifacts.md) | Sprint plan, reviews, retrospectives, backlog | **Available** |
 
@@ -867,5 +876,5 @@ The final PFE report (PDF) will reference this repository and README.
 This project is developed for **educational purposes** as part of the ESPRIT PFE (final year project). All rights reserved by the author and the internship host organisation.
 
 **Maintainer:** [Helmi Megdiche](https://github.com/Helmi-Megdiche)  
-**Last updated:** 10 August 2026  
-**Status:** Final — full `docs/` artefact set delivered; capture-timer tuning, foreground self-heal, post-mission grace, mission-helper fixes; **310** automated tests (181 mobile + 129 backend).
+**Last updated:** 31 August 2026  
+**Status:** Final — full `docs/` artefact set delivered; capture-timer tuning, foreground self-heal, post-mission grace, mission-helper fixes; native perceptual-hash frame-skip gate; **accessibility-driven app-switch capture + keyboard suppression** (`windowEventFilter`, `SafeGuardAccessibilityService`); **380** automated tests (251 mobile + 129 backend).

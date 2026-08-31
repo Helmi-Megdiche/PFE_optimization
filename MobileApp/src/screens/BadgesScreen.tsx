@@ -1,9 +1,7 @@
 import React, { useCallback, useLayoutEffect, useState } from 'react';
 import {
-  ActivityIndicator,
   Pressable,
   RefreshControl,
-  ScrollView,
   StyleSheet,
   Text,
   View,
@@ -13,6 +11,14 @@ import { BadgeRanksModal } from '../components/BadgeRanksModal';
 import { useChildId } from '../auth/useChildId';
 import { listBadges, type BadgeDto } from '../services/badgesApi';
 import { getChildPoints, getMissions } from '../services/missionsApi';
+import {
+  EmptyState,
+  Loader,
+  Screen,
+  SectionLabel,
+  StatTile,
+} from '../components/ui';
+import { colors, radius, shadow, spacing, type as typeScale } from '../theme';
 
 export function BadgesScreen(): React.JSX.Element {
   const navigation = useNavigation();
@@ -60,17 +66,15 @@ export function BadgesScreen(): React.JSX.Element {
   );
 
   if (loading) {
-    return (
-      <View style={styles.centered}>
-        <ActivityIndicator size="large" />
-      </View>
-    );
+    return <Loader />;
   }
+
+  const earned = badges.filter((b) => b.earned).length;
 
   return (
     <>
-      <ScrollView
-        style={styles.container}
+      <Screen
+        contentStyle={styles.content}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -78,23 +82,44 @@ export function BadgesScreen(): React.JSX.Element {
               setRefreshing(true);
               void load();
             }}
+            tintColor={colors.teal}
           />
         }>
-        <View style={styles.grid}>
-          {badges.map((b) => (
-            <View
-              key={b.id}
-              style={[styles.badge, b.earned ? styles.badgeEarned : styles.badgeLocked]}>
-              <Text style={styles.icon}>{b.icon ?? '🏅'}</Text>
-              <Text style={styles.name}>{b.name}</Text>
-              <Text style={styles.desc} numberOfLines={2}>
-                {b.description}
-              </Text>
-              <Text style={styles.status}>{b.earned ? 'Earned' : 'Locked'}</Text>
-            </View>
-          ))}
+        <View style={styles.stats}>
+          <StatTile label="Earned" value={`${earned}/${badges.length}`} tone="sage" />
+          <StatTile label="Points" value={totalPoints} tone="teal" />
+          <StatTile label="Missions" value={completedMissions} tone="neutral" />
         </View>
-      </ScrollView>
+
+        <SectionLabel>Badge collection</SectionLabel>
+
+        {badges.length ? (
+          <View style={styles.grid}>
+            {badges.map((b) => (
+              <View
+                key={b.id}
+                style={[styles.badge, b.earned ? styles.badgeEarned : styles.badgeLocked]}>
+                <View style={[styles.iconRing, b.earned && styles.iconRingEarned]}>
+                  <Text style={[styles.icon, !b.earned && styles.iconLocked]}>
+                    {b.earned ? b.icon ?? '🏅' : '🔒'}
+                  </Text>
+                </View>
+                <Text style={styles.name} numberOfLines={1}>
+                  {b.name}
+                </Text>
+                <Text style={styles.desc} numberOfLines={2}>
+                  {b.description}
+                </Text>
+                <Text style={[styles.status, b.earned ? styles.statusEarned : styles.statusLocked]}>
+                  {b.earned ? 'Earned' : 'Locked'}
+                </Text>
+              </View>
+            ))}
+          </View>
+        ) : (
+          <EmptyState icon="🏅" title="No badges yet" message="Complete missions to earn your first badge." />
+        )}
+      </Screen>
 
       <BadgeRanksModal
         visible={guideOpen}
@@ -107,28 +132,50 @@ export function BadgesScreen(): React.JSX.Element {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f8fafc' },
-  centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  headerBtn: { marginRight: 12 },
-  headerBtnText: { fontSize: 15, color: '#2563eb', fontWeight: '600' },
-  grid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    padding: 12,
-    gap: 12,
+  content: { gap: spacing.lg },
+  stats: { flexDirection: 'row', gap: spacing.md },
+  headerBtn: {
+    marginRight: spacing.lg,
+    backgroundColor: colors.tealSoft,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 6,
+    borderRadius: radius.pill,
   },
+  headerBtnText: { fontSize: 13, color: colors.tealDeep, fontWeight: '700' },
+  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md },
   badge: {
-    width: '47%',
-    backgroundColor: '#fff',
-    borderRadius: 10,
-    padding: 12,
+    width: '47.5%',
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
     borderWidth: 1,
-    borderColor: '#e2e8f0',
+    borderColor: colors.line,
+    padding: spacing.lg,
+    alignItems: 'center',
+    ...shadow.card,
   },
-  badgeEarned: { borderColor: '#22c55e' },
-  badgeLocked: { opacity: 0.65 },
-  icon: { fontSize: 28, textAlign: 'center' },
-  name: { fontSize: 14, fontWeight: '700', marginTop: 6, textAlign: 'center' },
-  desc: { fontSize: 11, color: '#64748b', marginTop: 4, textAlign: 'center' },
-  status: { fontSize: 11, marginTop: 6, textAlign: 'center', color: '#2563eb' },
+  badgeEarned: { borderColor: colors.tealBorder },
+  badgeLocked: { opacity: 0.7 },
+  iconRing: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: colors.surfaceAlt,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: spacing.md,
+  },
+  iconRingEarned: { backgroundColor: colors.tealSoft },
+  icon: { fontSize: 28 },
+  iconLocked: { fontSize: 22, opacity: 0.5 },
+  name: { ...typeScale.bodyStrong, textAlign: 'center' },
+  desc: { ...typeScale.meta, textAlign: 'center', marginTop: 4, minHeight: 34 },
+  status: {
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.4,
+    textTransform: 'uppercase',
+    marginTop: spacing.sm,
+  },
+  statusEarned: { color: colors.sage },
+  statusLocked: { color: colors.textFaint },
 });

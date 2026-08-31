@@ -9,6 +9,7 @@ import {
 } from '../../missions/games/gameLogic';
 import { difficultyForGame, recordGameResult } from '../../missions/games/gameStats';
 import type { GameProps } from './gameTypes';
+import { focus } from '../../theme';
 
 export function SudokuGame({ metadata, age, onComplete }: GameProps): React.JSX.Element {
   const [difficulty, setDifficulty] = useState<Difficulty>(
@@ -122,37 +123,47 @@ export function SudokuGame({ metadata, age, onComplete }: GameProps): React.JSX.
 const CELL = 64;
 const styles = StyleSheet.create({
   wrap: { alignItems: 'center' },
-  title: { color: '#fff', fontSize: 22, fontWeight: '700' },
-  sub: { color: '#94a3b8', marginTop: 6, textAlign: 'center', paddingHorizontal: 12 },
-  status: { color: '#cbd5e1', marginTop: 20, textAlign: 'center' },
-  grid: { marginTop: 18, width: CELL * 4, height: CELL * 4, flexDirection: 'row', flexWrap: 'wrap' },
+  title: { color: focus.text, fontSize: 22, fontWeight: '800' },
+  sub: { color: focus.textMuted, marginTop: 6, textAlign: 'center', paddingHorizontal: 12 },
+  status: { color: focus.textMuted, marginTop: 20, textAlign: 'center' },
+  grid: {
+    marginTop: 18,
+    width: CELL * 4,
+    height: CELL * 4,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: focus.border,
+    overflow: 'hidden',
+  },
   cell: {
     width: CELL,
     height: CELL,
     borderWidth: 1,
-    borderColor: '#334155',
+    borderColor: focus.border,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#1e293b',
+    backgroundColor: focus.surface,
   },
-  cellLight: { backgroundColor: '#243042' },
-  cellSelected: { borderColor: '#60a5fa', borderWidth: 2 },
-  cellClue: { backgroundColor: '#0f172a' },
-  value: { color: '#e2e8f0', fontSize: 26, fontWeight: '700' },
-  valueClue: { color: '#64748b' },
+  cellLight: { backgroundColor: focus.surfaceAlt },
+  cellSelected: { borderColor: focus.accent, borderWidth: 2 },
+  cellClue: { backgroundColor: focus.bg },
+  value: { color: focus.text, fontSize: 26, fontWeight: '700' },
+  valueClue: { color: focus.textMuted },
   pad: { flexDirection: 'row', marginTop: 18 },
   numBtn: {
     width: 52,
     height: 52,
-    backgroundColor: '#2563eb',
-    borderRadius: 8,
+    backgroundColor: focus.accentStrong,
+    borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
     marginHorizontal: 4,
   },
-  clearBtn: { backgroundColor: '#64748b' },
-  numText: { color: '#fff', fontSize: 20, fontWeight: '700' },
-  solved: { color: '#34d399', fontSize: 18, fontWeight: '700', marginTop: 18 },
+  clearBtn: { backgroundColor: focus.surface, borderWidth: 1, borderColor: focus.border },
+  numText: { color: '#FFFFFF', fontSize: 20, fontWeight: '700' },
+  solved: { color: focus.accent, fontSize: 18, fontWeight: '800', marginTop: 18 },
   giveUp: { marginTop: 18 },
-  giveUpText: { color: '#94a3b8', textDecorationLine: 'underline' },
+  giveUpText: { color: focus.textMuted, textDecorationLine: 'underline' },
 });

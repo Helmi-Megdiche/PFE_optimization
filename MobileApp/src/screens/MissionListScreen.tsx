@@ -1,46 +1,72 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import {
-  ActivityIndicator,
-  Alert,
-  Pressable,
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { Alert, RefreshControl, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { useChildId } from '../auth/useChildId';
 import { getMissions, type MissionDto } from '../services/missionsApi';
 import { navigateToMissionScreen } from '../navigation/navigationRef';
+import {
+  AppText,
+  Card,
+  EmptyState,
+  Loader,
+  Pill,
+  Screen,
+  SectionLabel,
+} from '../components/ui';
+import { colors, spacing } from '../theme';
 
 function missionType(m: MissionDto): string {
   return String(m.metadata?.type ?? 'real_world');
 }
 
+type SectionTone = 'teal' | 'amber' | 'sage' | 'coral' | 'neutral';
+
 function MissionSection({
   title,
+  tone,
   missions,
   onOpen,
+  interactive,
 }: {
   title: string;
+  tone: SectionTone;
   missions: MissionDto[];
   onOpen: (m: MissionDto) => void;
+  interactive: boolean;
 }): React.JSX.Element | null {
   if (!missions.length) {
     return null;
   }
   return (
     <View style={styles.section}>
-      <Text style={styles.sectionTitle}>{title}</Text>
+      <View style={styles.sectionHead}>
+        <SectionLabel>{title}</SectionLabel>
+        <Pill label={String(missions.length)} tone={tone} />
+      </View>
       {missions.map((m) => (
-        <Pressable key={m.id} style={styles.card} onPress={() => onOpen(m)}>
-          <Text style={styles.cardTitle}>{m.title}</Text>
-          <Text style={styles.cardDesc}>{m.description}</Text>
-          <Text style={styles.cardMeta}>
-            {m.points} pts · {m.status} · {missionType(m)}
-          </Text>
-        </Pressable>
+        <Card
+          key={m.id}
+          onPress={interactive ? () => onOpen(m) : undefined}
+          style={styles.card}>
+          <View style={styles.cardHead}>
+            <AppText variant="cardTitle" numberOfLines={1} style={{ flex: 1 }}>
+              {m.title}
+            </AppText>
+            <View style={styles.points}>
+              <Text style={styles.pointsNum}>{m.points}</Text>
+              <Text style={styles.pointsLabel}>pts</Text>
+            </View>
+          </View>
+          <AppText variant="body" numberOfLines={2} style={{ marginTop: 4 }}>
+            {m.description}
+          </AppText>
+          <View style={styles.cardMeta}>
+            <Pill label={missionType(m).replace('_', ' ')} tone="neutral" />
+            {interactive ? (
+              <Text style={styles.cta}>Start →</Text>
+            ) : null}
+          </View>
+        </Card>
       ))}
     </View>
   );
@@ -104,58 +130,87 @@ export function MissionListScreen(): React.JSX.Element {
   };
 
   if (childLoading || loading) {
-    return (
-      <View style={styles.centered}>
-        <ActivityIndicator size="large" />
-      </View>
-    );
+    return <Loader />;
   }
 
   if (!childId) {
     return (
-      <View style={styles.centered}>
-        <Text>No child profile — log in first.</Text>
-      </View>
+      <Screen scroll={false} contentStyle={styles.centerPad}>
+        <EmptyState icon="🔑" title="No child profile" message="Log in first to see missions." />
+      </Screen>
     );
   }
 
+  const nothing =
+    !data?.pending.length && !data?.pendingApproval.length && !data?.completed.length;
+
   return (
-    <ScrollView
-      style={styles.container}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}>
-      <MissionSection title="Active" missions={data?.pending ?? []} onOpen={openMission} />
+    <Screen
+      contentStyle={styles.content}
+      refreshControl={
+        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.teal} />
+      }>
+      <MissionSection
+        title="Active"
+        tone="teal"
+        missions={data?.pending ?? []}
+        onOpen={openMission}
+        interactive
+      />
       <MissionSection
         title="Awaiting parent approval"
+        tone="amber"
         missions={data?.pendingApproval ?? []}
         onOpen={() => undefined}
+        interactive={false}
       />
-      <MissionSection title="Completed" missions={data?.completed ?? []} onOpen={() => undefined} />
-      <MissionSection title="Failed / escaped" missions={data?.failed ?? []} onOpen={() => undefined} />
-      <MissionSection title="Expired" missions={data?.expired ?? []} onOpen={() => undefined} />
-      {!data?.pending.length &&
-      !data?.pendingApproval.length &&
-      !data?.completed.length ? (
-        <Text style={styles.empty}>No missions yet.</Text>
+      <MissionSection
+        title="Completed"
+        tone="sage"
+        missions={data?.completed ?? []}
+        onOpen={() => undefined}
+        interactive={false}
+      />
+      <MissionSection
+        title="Failed / escaped"
+        tone="coral"
+        missions={data?.failed ?? []}
+        onOpen={() => undefined}
+        interactive={false}
+      />
+      <MissionSection
+        title="Expired"
+        tone="neutral"
+        missions={data?.expired ?? []}
+        onOpen={() => undefined}
+        interactive={false}
+      />
+      {nothing ? (
+        <EmptyState
+          icon="🎯"
+          title="No missions yet"
+          message="Missions appear here when SafeGuard spots a chance to build a healthier habit."
+        />
       ) : null}
-    </ScrollView>
+    </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f8fafc' },
-  centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  section: { padding: 16, paddingBottom: 0 },
-  sectionTitle: { fontSize: 16, fontWeight: '700', marginBottom: 8, color: '#0f172a' },
-  card: {
-    backgroundColor: '#fff',
-    borderRadius: 10,
-    padding: 14,
-    marginBottom: 10,
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
+  content: { gap: spacing.xl },
+  centerPad: { flex: 1, justifyContent: 'center' },
+  section: { gap: spacing.md },
+  sectionHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  card: { gap: 2 },
+  cardHead: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
+  points: { flexDirection: 'row', alignItems: 'baseline', gap: 2 },
+  pointsNum: { fontSize: 20, fontWeight: '800', color: colors.teal, letterSpacing: -0.5 },
+  pointsLabel: { fontSize: 11, fontWeight: '700', color: colors.textFaint },
+  cardMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: spacing.md,
   },
-  cardTitle: { fontSize: 15, fontWeight: '600', color: '#0f172a' },
-  cardDesc: { fontSize: 13, color: '#64748b', marginTop: 4 },
-  cardMeta: { fontSize: 12, color: '#94a3b8', marginTop: 6 },
-  empty: { textAlign: 'center', color: '#94a3b8', marginTop: 40 },
+  cta: { fontSize: 13, fontWeight: '700', color: colors.teal },
 });

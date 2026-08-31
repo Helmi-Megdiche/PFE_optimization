@@ -11,7 +11,13 @@ import com.facebook.react.defaults.DefaultReactActivityDelegate
 class MainActivity : ReactActivity() {
 
   override fun onCreate(savedInstanceState: Bundle?) {
-    super.onCreate(savedInstanceState)
+    // Pass null, never savedInstanceState: react-native-screens' ScreenStackFragment
+    // throws "Screen fragments should never be restored" if Android recreates this
+    // activity and tries to restore the fragment back-stack — which happens when an
+    // accessibility service connects/disconnects (global config change) or when the
+    // OS kills this app while backgrounded and restores it. RN drives navigation from
+    // JS, so there is no fragment state worth restoring.
+    super.onCreate(null)
     OverlayLaunchHolder.setFromIntent(intent)
   }
 

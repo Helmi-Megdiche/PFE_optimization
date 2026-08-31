@@ -9,6 +9,7 @@ import {
 } from '../../missions/games/gameLogic';
 import { nextNbackLevel, recordGameResult } from '../../missions/games/gameStats';
 import type { GameProps } from './gameTypes';
+import { focus } from '../../theme';
 
 const TRIALS = 20;
 const STEP_MS = 1800;
@@ -125,29 +126,31 @@ export function NBackGame({ metadata, onComplete }: GameProps): React.JSX.Elemen
 
 const styles = StyleSheet.create({
   wrap: { alignItems: 'center' },
-  title: { color: '#fff', fontSize: 22, fontWeight: '700' },
-  sub: { color: '#94a3b8', marginTop: 6, textAlign: 'center', paddingHorizontal: 16 },
+  title: { color: focus.text, fontSize: 22, fontWeight: '800' },
+  sub: { color: focus.textMuted, marginTop: 6, textAlign: 'center', paddingHorizontal: 16 },
   stage: {
     marginTop: 28,
     width: 160,
     height: 160,
-    borderRadius: 16,
-    backgroundColor: '#1e293b',
+    borderRadius: 24,
+    backgroundColor: focus.surface,
+    borderWidth: 1,
+    borderColor: focus.border,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  letter: { color: '#60a5fa', fontSize: 80, fontWeight: '800' },
-  progress: { color: '#cbd5e1', marginTop: 18 },
+  letter: { color: focus.accent, fontSize: 80, fontWeight: '800' },
+  progress: { color: focus.textMuted, marginTop: 18 },
   matchBtn: {
     marginTop: 24,
-    backgroundColor: '#2563eb',
+    backgroundColor: focus.accentStrong,
     paddingVertical: 16,
     paddingHorizontal: 48,
-    borderRadius: 10,
+    borderRadius: 14,
   },
-  btnDisabled: { backgroundColor: '#475569', opacity: 0.85 },
-  matchBtnActive: { backgroundColor: '#1d4ed8' },
-  matchText: { color: '#fff', fontSize: 18, fontWeight: '700' },
-  hint: { color: '#fbbf24', marginTop: 12, textAlign: 'center', paddingHorizontal: 12 },
-  tapOk: { color: '#4ade80', marginTop: 8, fontWeight: '700' },
+  btnDisabled: { backgroundColor: focus.surface, opacity: 0.85 },
+  matchBtnActive: { backgroundColor: focus.accent },
+  matchText: { color: '#FFFFFF', fontSize: 18, fontWeight: '700' },
+  hint: { color: focus.amber, marginTop: 12, textAlign: 'center', paddingHorizontal: 12 },
+  tapOk: { color: focus.accent, marginTop: 8, fontWeight: '700' },
 });

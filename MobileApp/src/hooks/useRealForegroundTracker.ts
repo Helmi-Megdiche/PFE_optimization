@@ -80,6 +80,12 @@ export function useRealForegroundTracker(enabled: boolean): void {
     const payload = [...batchRef.current];
     batchRef.current = [];
 
+    // A concurrent flush (teardown fires several at once) may have already
+    // drained the queue between the length check above and this point.
+    if (payload.length === 0) {
+      return;
+    }
+
     try {
       const result = await postUsageSessions(payload);
       scLog('[Usage] Sent sessions batch', {

@@ -18,6 +18,7 @@ import {
   type MissionCompletionPayload,
 } from '../services/missionsApi';
 import { resolveGameComponent } from './missions/gameRegistry';
+import { focus } from '../theme';
 import {
   beginMissionCaptureSession,
   forceEndMissionCaptureSession,
@@ -154,16 +155,24 @@ export function MissionScreen({ navigation, route }: Props): React.JSX.Element {
         scrollEnabled={false}
         bounces={false}>
         <View style={styles.header}>
-          <Text style={styles.badge}>ACTIVE MISSION</Text>
-          <Pressable onPress={confirmQuit} hitSlop={12}>
+          <View style={styles.badge}>
+            <View style={styles.badgeDot} />
+            <Text style={styles.badgeText}>ACTIVE MISSION</Text>
+          </View>
+          <Pressable onPress={confirmQuit} hitSlop={12} style={styles.quitBtn}>
             <Text style={styles.quit}>Quit</Text>
           </Pressable>
         </View>
         <Text style={styles.title}>{title}</Text>
         <Text style={styles.desc}>{description}</Text>
-        <Text style={styles.meta}>
-          {points} points · {missionType}
-        </Text>
+        <View style={styles.chips}>
+          <View style={styles.pointsChip}>
+            <Text style={styles.pointsChipText}>+{points} pts</Text>
+          </View>
+          <View style={styles.typeChip}>
+            <Text style={styles.typeChipText}>{missionType.replace('_', ' ')}</Text>
+          </View>
+        </View>
 
         <View style={styles.gameArea}>
           {GameComponent ? (
@@ -193,23 +202,54 @@ export function MissionScreen({ navigation, route }: Props): React.JSX.Element {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#0f172a' },
+  root: { flex: 1, backgroundColor: focus.bg },
   content: { padding: 20, paddingTop: 44, paddingBottom: 40 },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  badge: { color: '#fbbf24', fontSize: 12, fontWeight: '700', letterSpacing: 1 },
-  quit: { color: '#f87171', fontWeight: '700' },
-  title: { color: '#fff', fontSize: 24, fontWeight: '700', marginTop: 8 },
-  desc: { color: '#cbd5e1', fontSize: 15, marginTop: 8, lineHeight: 22 },
-  meta: { color: '#94a3b8', marginTop: 12 },
-  gameArea: { marginTop: 24, alignItems: 'center' },
-  warning: { color: '#f87171', fontSize: 13, marginTop: 28, lineHeight: 20, textAlign: 'center' },
+  badge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: focus.surface,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 999,
+  },
+  badgeDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: focus.amber },
+  badgeText: { color: focus.amber, fontSize: 11, fontWeight: '800', letterSpacing: 1.2 },
+  quitBtn: {
+    borderWidth: 1,
+    borderColor: focus.border,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 999,
+  },
+  quit: { color: focus.coral, fontWeight: '700', fontSize: 13 },
+  title: { color: focus.text, fontSize: 26, fontWeight: '800', marginTop: 18, letterSpacing: -0.5 },
+  desc: { color: focus.textMuted, fontSize: 15, marginTop: 8, lineHeight: 22 },
+  chips: { flexDirection: 'row', gap: 8, marginTop: 16 },
+  pointsChip: {
+    backgroundColor: focus.accentStrong,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 999,
+  },
+  pointsChipText: { color: '#FFFFFF', fontWeight: '800', fontSize: 13 },
+  typeChip: {
+    backgroundColor: focus.surface,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 999,
+  },
+  typeChipText: { color: focus.textMuted, fontWeight: '700', fontSize: 13 },
+  gameArea: { marginTop: 28, alignItems: 'center' },
+  warning: { color: focus.textMuted, fontSize: 12.5, marginTop: 28, lineHeight: 20, textAlign: 'center' },
   primaryBtn: {
     marginTop: 8,
-    backgroundColor: '#2563eb',
+    backgroundColor: focus.accentStrong,
     paddingVertical: 16,
     paddingHorizontal: 40,
-    borderRadius: 10,
+    borderRadius: 14,
     alignItems: 'center',
   },
-  primaryBtnText: { color: '#fff', fontSize: 16, fontWeight: '700' },
+  primaryBtnText: { color: '#FFFFFF', fontSize: 16, fontWeight: '700' },
 });

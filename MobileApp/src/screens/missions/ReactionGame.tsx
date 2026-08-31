@@ -7,6 +7,7 @@ import {
 } from '../../missions/games/gameLogic';
 import { difficultyForGame, recordGameResult } from '../../missions/games/gameStats';
 import type { GameProps } from './gameTypes';
+import { focus } from '../../theme';
 
 const ATTEMPTS = 3;
 type Phase = 'idle' | 'waiting' | 'go' | 'tooSoon' | 'done';
@@ -74,7 +75,7 @@ export function ReactionGame({ age, onComplete }: GameProps): React.JSX.Element 
   };
 
   const bg =
-    phase === 'go' ? '#16a34a' : phase === 'tooSoon' ? '#b91c1c' : '#1e293b';
+    phase === 'go' ? focus.accentStrong : phase === 'tooSoon' ? focus.coral : focus.surface;
   const label =
     phase === 'idle'
       ? 'Tap to start'
@@ -108,17 +109,19 @@ export function ReactionGame({ age, onComplete }: GameProps): React.JSX.Element 
 
 const styles = StyleSheet.create({
   wrap: { alignItems: 'center' },
-  title: { color: '#fff', fontSize: 22, fontWeight: '700' },
-  sub: { color: '#94a3b8', marginTop: 6 },
+  title: { color: focus.text, fontSize: 22, fontWeight: '800' },
+  sub: { color: focus.textMuted, marginTop: 6 },
   stage: {
     marginTop: 24,
     width: 280,
     height: 280,
-    borderRadius: 16,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: focus.border,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  stageText: { color: '#fff', fontSize: 24, fontWeight: '800' },
-  ms: { color: '#e2e8f0', marginTop: 8, fontSize: 16 },
-  avg: { color: '#cbd5e1', marginTop: 18 },
+  stageText: { color: '#FFFFFF', fontSize: 24, fontWeight: '800' },
+  ms: { color: focus.text, marginTop: 8, fontSize: 16 },
+  avg: { color: focus.textMuted, marginTop: 18 },
 });

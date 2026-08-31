@@ -14,6 +14,7 @@ import com.mobileapp.screencapture.ScreenCapturePackage
 import com.mobileapp.foreground.ForegroundAppPackage
 import com.mobileapp.nsfw.NsfwTflitePackage
 import com.mobileapp.overlay.OverlayPackage
+import com.mobileapp.accessibility.AccessibilityPackage
 
 class MainApplication : Application(), ReactApplication {
 
@@ -25,6 +26,7 @@ class MainApplication : Application(), ReactApplication {
               add(ForegroundAppPackage())
               add(NsfwTflitePackage())
               add(OverlayPackage())
+              add(AccessibilityPackage())
             }
 
         override fun getJSMainModuleName(): String = "index"

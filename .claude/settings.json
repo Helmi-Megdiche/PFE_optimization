@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "shell": "bash",
+            "statusMessage": "Checking CLAUDE.md is up to date…",
+            "command": "input=$(cat); printf '%s' \"$input\" | grep -q '\"stop_hook_active\":true' && exit 0; ch=$(git status --porcelain 2>/dev/null); code=$(printf '%s' \"$ch\" | grep -E '(MobileApp|backend|scripts|docs)/|demo_dashboard\\.html'); cmd=$(printf '%s' \"$ch\" | grep -E 'CLAUDE\\.md'); if [ -n \"$code\" ] && [ -z \"$cmd\" ]; then printf '{\"decision\":\"block\",\"reason\":\"Project rule (CLAUDE.md working rule): you changed source files but did not update CLAUDE.md this session. Update CLAUDE.md to reflect what changed — new/renamed commands, routes, modules, conventions, or gotchas — then stop. If the change genuinely documents nothing new, say so in one line and stop.\"}'; fi; exit 0"
+          }
+        ]
+      }
+    ]
+  }
+}

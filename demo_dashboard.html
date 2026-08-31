@@ -3,38 +3,110 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Parental Control AI – Live Demo</title>
+  <title>SafeGuard — Parent Dashboard</title>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    /* Calm Guardian — remap Tailwind's generic scales to the SafeGuard identity.
+       Recolours static markup AND JS-generated content in one place. */
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['ui-sans-serif', 'system-ui', '-apple-system', 'Segoe UI', 'Roboto', 'Helvetica', 'Arial', 'sans-serif'],
+          },
+          colors: {
+            // warm neutral spine (was slate)
+            slate: {
+              50: '#FAF7F0', 100: '#F4EFE6', 200: '#E7DFD1', 300: '#D8CDB9',
+              400: '#93A09B', 500: '#5F6F6B', 600: '#4A5A56', 700: '#2E413C',
+              800: '#1E332F', 900: '#14302E',
+            },
+            // primary → teal (was indigo)
+            indigo: {
+              50: '#E1EFEA', 100: '#D3E7E0', 200: '#BFDBD2', 300: '#9CC7BB',
+              400: '#4FA08F', 500: '#1F6F63', 600: '#1F6F63', 700: '#16564C',
+              800: '#124A42', 900: '#0F3E37',
+            },
+            // secondary accent → deep teal (was violet)
+            violet: {
+              50: '#E1EFEA', 100: '#D3E7E0', 500: '#2A7D6E', 600: '#237065', 700: '#16564C',
+            },
+            // success → sage (was emerald/green/teal)
+            emerald: { 50: '#DFF1EA', 100: '#CFE9E0', 500: '#2E9E7B', 600: '#2E9E7B', 700: '#1E6B50' },
+            teal: { 50: '#DFF1EA', 100: '#CFE9E0', 500: '#2E9E7B', 600: '#1F6F63', 700: '#16564C' },
+            // danger → coral (was red/rose)
+            red: { 50: '#FCE9E3', 100: '#F8DBD1', 200: '#F3C7BB', 500: '#E8654A', 600: '#E8654A', 700: '#C24328', 800: '#9B2D18', 900: '#7A2313' },
+            // warnings warmed (amber)
+            amber: { 50: '#F7ECD5', 100: '#F1DFB8', 200: '#EAD3A0', 700: '#9A7620', 800: '#8A6416' },
+          },
+        },
+      },
+    };
+  </script>
   <style>
-    .risk-high { color: #dc2626; font-weight: 600; }
-    .risk-low { color: #16a34a; }
-    .log-entry { font-family: ui-monospace, monospace; font-size: 0.75rem; }
-    #statusBanner.error { background: #fef2f2; border-color: #fecaca; color: #991b1b; }
-    #statusBanner.ok { background: #f0fdf4; border-color: #bbf7d0; color: #166534; }
-    #statusBanner.warn { background: #fffbeb; border-color: #fde68a; color: #92400e; }
-    .badge-adult { background: #fee2e2; color: #991b1b; }
-    .badge-violent { background: #ffedd5; color: #9a3412; }
-    .badge-gore { background: #fce7f3; color: #9d174d; }
-    .badge-dangerous, .badge-dangerous_challenge { background: #fef3c7; color: #92400e; }
-    .badge-educational { background: #dbeafe; color: #1e40af; }
-    .badge-neutral { background: #f1f5f9; color: #475569; }
-    .tab-btn { padding: 0.5rem 1rem; border-radius: 0.5rem; font-size: 0.875rem; font-weight: 500; background: #e2e8f0; color: #475569; }
-    .tab-btn:hover { background: #cbd5e1; }
-    .tab-btn.tab-active { background: #4f46e5; color: #fff; }
+    :root {
+      --cg-sand: #F4EFE6; --cg-surface: #FFFDFA; --cg-ink: #14302E; --cg-teal: #1F6F63;
+      --cg-teal-deep: #16564C; --cg-teal-soft: #E1EFEA; --cg-line: #E7DFD1;
+      --cg-coral: #E8654A; --cg-sage: #2E9E7B; --cg-amber: #D9992F; --cg-muted: #5F6F6B;
+    }
+    body { background: var(--cg-sand); color: #1E332F; -webkit-font-smoothing: antialiased; }
+    h1, h2, h3 { letter-spacing: -0.01em; }
+
+    /* Cards — warmer surface, softer elevation, rounder */
+    section.bg-white, .summary-card, #summaryCards > div, .grid > .bg-white {
+      background: var(--cg-surface);
+      border-color: var(--cg-line) !important;
+      border-radius: 18px;
+      box-shadow: 0 6px 18px -8px rgba(58,46,26,0.18);
+    }
+    /* Brand mark */
+    .brand-mark {
+      width: 40px; height: 40px; border-radius: 12px; display: inline-flex;
+      align-items: center; justify-content: center; background: var(--cg-teal); color: #fff;
+      font-size: 20px; box-shadow: 0 6px 14px -6px rgba(31,111,99,0.7);
+    }
+    /* Inputs */
+    input, select { background: #FFFDFA; }
+    input:focus, select:focus { outline: none; box-shadow: 0 0 0 3px rgba(31,111,99,0.18); border-color: var(--cg-teal) !important; }
+
+    .risk-high { color: var(--cg-coral); font-weight: 700; }
+    .risk-low { color: var(--cg-sage); }
+    .log-entry { font-family: ui-monospace, 'SFMono-Regular', Menlo, monospace; font-size: 0.75rem; }
+    #statusBanner.error { background: #FCE9E3; border-color: #F3C7BB; color: #9B2D18; }
+    #statusBanner.ok { background: #DFF1EA; border-color: #BFDBD2; color: #1E6B50; }
+    #statusBanner.warn { background: #F7ECD5; border-color: #EAD3A0; color: #8A6416; }
+
+    /* Category badges — warm, cohesive */
+    .badge-adult { background: #FCE9E3; color: #9B2D18; }
+    .badge-violent { background: #F7E4D6; color: #8A3B18; }
+    .badge-gore { background: #F8E1EA; color: #8A1F45; }
+    .badge-dangerous, .badge-dangerous_challenge { background: #F7ECD5; color: #8A6416; }
+    .badge-educational { background: #E1EFEA; color: #16564C; }
+    .badge-neutral { background: #F2EDE2; color: #5F6F6B; }
+
+    /* Tabs — pill group */
+    #tabBar { background: #EDE6D8; padding: 4px; border-radius: 999px; display: inline-flex; gap: 4px; }
+    .tab-btn { padding: 0.5rem 1.15rem; border-radius: 999px; font-size: 0.875rem; font-weight: 600; background: transparent; color: var(--cg-muted); transition: all .15s; }
+    .tab-btn:hover { color: var(--cg-ink); }
+    .tab-btn.tab-active { background: var(--cg-surface); color: var(--cg-teal-deep); box-shadow: 0 2px 6px -2px rgba(58,46,26,0.25); }
+
     #toastContainer { position: fixed; bottom: 1rem; right: 1rem; z-index: 50; display: flex; flex-direction: column; gap: 0.5rem; max-width: 20rem; }
-    .toast { padding: 0.75rem 1rem; border-radius: 0.5rem; font-size: 0.875rem; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1); }
-    .toast-ok { background: #f0fdf4; border: 1px solid #bbf7d0; color: #166534; }
-    .toast-error { background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; }
+    .toast { padding: 0.75rem 1rem; border-radius: 12px; font-size: 0.875rem; box-shadow: 0 10px 24px -12px rgba(58,46,26,0.4); }
+    .toast-ok { background: #DFF1EA; border: 1px solid #BFDBD2; color: #1E6B50; }
+    .toast-error { background: #FCE9E3; border: 1px solid #F3C7BB; color: #9B2D18; }
   </style>
 </head>
-<body class="bg-slate-100 min-h-screen text-slate-800">
+<body class="min-h-screen">
   <!-- Browser notifications may not work when opened via file:// — use http://localhost:3000/demo.html -->
   <div class="max-w-7xl mx-auto p-4 md:p-6">
     <header class="mb-6 flex flex-col md:flex-row md:items-end md:justify-between gap-4">
-      <div>
-        <h1 class="text-3xl font-bold text-slate-900">Parental Control AI</h1>
-        <p class="text-slate-600 mt-1">Live demo dashboard — ESPRIT PFE (Sprint 1–5.7)</p>
+      <div class="flex items-center gap-3">
+        <span class="brand-mark" aria-hidden="true">&#128737;</span>
+        <div>
+          <h1 class="text-3xl font-bold text-slate-900">SafeGuard</h1>
+          <p class="text-slate-500 mt-1 text-sm">Parent dashboard · on-device child safety</p>
+        </div>
       </div>
       <div class="flex flex-wrap gap-2 items-center">
         <button id="btnRefresh" type="button" class="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-sm font-medium">
@@ -78,99 +150,6 @@
     </div>
 
     <div id="tabMonitoring">
-
-    <!-- Vision Model Debug Tool -->
-    <section class="bg-white rounded-xl shadow-sm border border-slate-200 p-4 mb-6">
-      <h2 class="text-lg font-semibold mb-1">Vision Model Debug Tool</h2>
-      <p class="text-sm text-slate-500 mb-2">
-        Upload any image to <code class="bg-slate-100 px-1 rounded">POST /api/debug/classify</code>
-        — backend <strong>nsfwjs</strong> (5 classes) + <strong>Tesseract OCR</strong> (30% / 70% weights).
-      </p>
-      <p class="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-4">
-        <strong>Not the same as the child app.</strong> On-device monitoring uses Yahoo Open NSFW
-        <code class="bg-amber-100 px-1 rounded">nsfw.tflite</code> + ML Kit + ML Kit OCR. Scores here can differ from
-        live <code class="bg-amber-100 px-1 rounded">screen_events</code> rows (look for <code class="bg-amber-100 px-1 rounded">TFLite-NSFW:%</code> in the table).
-      </p>
-      <div class="flex flex-wrap gap-3 items-end">
-        <label class="block">
-          <span class="text-sm text-slate-600">Image file</span>
-          <input id="debugImage" type="file" accept="image/*"
-            class="mt-1 block text-sm text-slate-600 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-indigo-50 file:text-indigo-700" />
-        </label>
-        <button id="btnClassify" type="button"
-          class="px-4 py-2 bg-violet-600 text-white rounded-lg hover:bg-violet-700 text-sm font-medium">
-          Analyze
-        </button>
-        <span id="classifyStatus" class="text-sm text-slate-500"></span>
-      </div>
-      <div id="classifyPreview" class="mt-4 hidden">
-        <img id="classifyThumb" alt="Preview" class="max-h-40 rounded-lg border border-slate-200 mb-4" />
-        <div class="flex flex-wrap gap-3 items-center mb-4 p-3 bg-slate-50 rounded-lg border">
-          <span class="text-sm text-slate-500">Combined</span>
-          <span id="classifyBadge" class="inline-flex px-3 py-1 rounded-full text-sm font-semibold"></span>
-          <span class="text-sm text-slate-600">Score: <strong id="classifyRiskScore">—</strong>/100</span>
-        </div>
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-          <div class="border border-slate-200 rounded-lg p-3">
-            <h3 class="text-sm font-semibold text-violet-700 mb-2">Vision (backend nsfwjs, 70%)</h3>
-            <p class="text-xs text-slate-500 mb-2">Category: <strong id="visionCategory" class="capitalize">—</strong> · Score: <strong id="visionRiskScore">—</strong></p>
-            <table class="min-w-full text-xs">
-              <thead class="text-slate-500"><tr><th class="text-left py-1">Class</th><th class="text-right py-1">Prob</th></tr></thead>
-              <tbody id="visionLabelsBody" class="font-mono"></tbody>
-            </table>
-          </div>
-          <div class="border border-slate-200 rounded-lg p-3">
-            <h3 class="text-sm font-semibold text-indigo-700 mb-2">OCR (Tesseract, 30%)</h3>
-            <p class="text-xs text-slate-500 mb-2">Category: <strong id="ocrCategory" class="capitalize">—</strong> · Score: <strong id="ocrRiskScore">—</strong></p>
-            <p class="text-xs text-slate-600 mb-1">Matched: <span id="ocrKeywords" class="font-mono">—</span></p>
-            <p class="text-xs text-slate-500 font-medium mt-2">Extracted text</p>
-            <pre id="ocrText" class="text-xs bg-slate-50 p-2 rounded border max-h-28 overflow-y-auto whitespace-pre-wrap"></pre>
-          </div>
-        </div>
-        <p id="classifyNote" class="text-xs text-slate-400 mt-2"></p>
-      </div>
-    </section>
-
-    <!-- Arabic OCR Debug Tool (server-side) -->
-    <section class="bg-white rounded-xl shadow-sm border border-slate-200 p-4 mb-6">
-      <h2 class="text-lg font-semibold mb-1">Arabic OCR Debug Tool (server-side)</h2>
-      <p class="text-sm text-slate-500 mb-2">
-        Upload an image to <code class="bg-slate-100 px-1 rounded">POST /api/debug/arabic-ocr</code>
-        — backend <strong>Tesseract</strong> with <code class="bg-slate-100 px-1 rounded">ara</code> (Arabic-only model)
-        + 1600px upscale + multilingual keyword filter.
-      </p>
-      <p class="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-4">
-        <strong>Demo only — privacy note.</strong> This tool sends the image to the backend server.
-        The production child app never uploads screenshots; on-device monitoring uses ML Kit Latin OCR
-        + Arabizi normalization. Use this to demonstrate Arabic script recognition for your PFE report.
-      </p>
-      <div class="flex flex-wrap gap-3 items-end">
-        <label class="block">
-          <span class="text-sm text-slate-600">Image file</span>
-          <input id="arabicOcrImage" type="file" accept="image/*"
-            class="mt-1 block text-sm text-slate-600 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-teal-50 file:text-teal-700" />
-        </label>
-        <button id="btnArabicOcr" type="button"
-          class="px-4 py-2 bg-teal-600 text-white rounded-lg hover:bg-teal-700 text-sm font-medium">
-          Analyze Arabic
-        </button>
-        <span id="arabicOcrStatus" class="text-sm text-slate-500"></span>
-      </div>
-      <div id="arabicOcrPreview" class="mt-4 hidden">
-        <img id="arabicOcrThumb" alt="Preview" class="max-h-40 rounded-lg border border-slate-200 mb-4" />
-        <div class="flex flex-wrap gap-3 items-center mb-4 p-3 bg-slate-50 rounded-lg border">
-          <span class="text-sm text-slate-500">Risk</span>
-          <span id="arabicOcrBadge" class="inline-flex px-3 py-1 rounded-full text-sm font-semibold"></span>
-          <span class="text-sm text-slate-600">Score: <strong id="arabicOcrRiskScore">—</strong>/100</span>
-          <span class="text-sm text-slate-600">Confidence: <strong id="arabicOcrConfidence">—</strong>%</span>
-        </div>
-        <p class="text-xs text-slate-600 mb-1">Matched keywords: <span id="arabicOcrKeywords" class="font-mono">—</span></p>
-        <p class="text-xs text-slate-500 font-medium mt-3">Extracted text (Arabic / mixed script)</p>
-        <pre id="arabicOcrText" dir="auto"
-          class="text-sm bg-slate-50 p-3 rounded border max-h-36 overflow-y-auto whitespace-pre-wrap font-sans"></pre>
-        <p id="arabicOcrNote" class="text-xs text-slate-400 mt-2"></p>
-      </div>
-    </section>
 
     <!-- Summary cards -->
     <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6" id="summaryCards">
@@ -866,15 +845,26 @@
 
       function renderScoresChart(scores) {
         const empty = $('scoresEmpty');
+        const canvas = $('scoresChart');
         const { labels, addiction, wellbeing, hasAny } = buildSevenDayScoreSeries(scores);
 
+        // No cron data yet: hide the empty plot grid and show the guidance line instead.
         if (!hasAny) {
           empty.classList.remove('hidden');
-        } else {
-          empty.classList.add('hidden');
+          canvas.style.display = 'none';
+          if (scoresChart) {
+            scoresChart.destroy();
+            scoresChart = null;
+          }
+          return;
         }
+        empty.classList.add('hidden');
+        canvas.style.display = '';
 
-        const ctx = $('scoresChart').getContext('2d');
+        // Calm Guardian palette: coral = addiction risk (bad), sage = well-being (good).
+        const CORAL = '#E8654A';
+        const SAGE = '#2E9E7B';
+        const ctx = canvas.getContext('2d');
         if (scoresChart) scoresChart.destroy();
 
         scoresChart = new Chart(ctx, {
@@ -885,33 +875,50 @@
               {
                 label: 'Addiction risk',
                 data: addiction,
-                borderColor: '#dc2626',
-                backgroundColor: 'rgba(220, 38, 38, 0.1)',
-                tension: 0.3,
+                borderColor: CORAL,
+                backgroundColor: 'rgba(232, 101, 74, 0.12)',
+                pointBackgroundColor: CORAL,
+                pointRadius: 3,
+                borderWidth: 2,
+                tension: 0.35,
                 fill: true,
-                spanGaps: false,
+                spanGaps: true,
               },
               {
                 label: 'Well-being',
                 data: wellbeing,
-                borderColor: '#16a34a',
-                backgroundColor: 'rgba(22, 163, 74, 0.1)',
-                tension: 0.3,
+                borderColor: SAGE,
+                backgroundColor: 'rgba(46, 158, 123, 0.12)',
+                pointBackgroundColor: SAGE,
+                pointRadius: 3,
+                borderWidth: 2,
+                tension: 0.35,
                 fill: true,
-                spanGaps: false,
+                spanGaps: true,
               },
             ],
           },
           options: {
             responsive: true,
             maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
             scales: {
               x: {
-                title: { display: true, text: 'Date (last 7 days)' },
+                title: { display: true, text: 'Date (last 7 days)', color: '#5F6F6B' },
+                grid: { color: 'rgba(20, 48, 46, 0.06)' },
+                ticks: { color: '#5F6F6B' },
               },
-              y: { min: 0, max: 100, title: { display: true, text: 'Score (0–100)' } },
+              y: {
+                min: 0,
+                max: 100,
+                title: { display: true, text: 'Score (0–100)', color: '#5F6F6B' },
+                grid: { color: 'rgba(20, 48, 46, 0.06)' },
+                ticks: { color: '#5F6F6B' },
+              },
             },
-            plugins: { legend: { position: 'bottom' } },
+            plugins: {
+              legend: { position: 'bottom', labels: { color: '#14302E', usePointStyle: true, pointStyle: 'circle' } },
+            },
           },
         });
       }
@@ -1754,136 +1761,6 @@
       if ('Notification' in window) {
         Notification.requestPermission().catch(() => undefined);
       }
-
-      function classifyBadgeClass(category) {
-        const c = (category || 'neutral').toLowerCase().replace(/\s+/g, '_');
-        return 'badge-' + c.split('_')[0];
-      }
-
-      async function classifyDebugImage() {
-        const input = $('debugImage');
-        const file = input.files && input.files[0];
-        if (!file) {
-          $('classifyStatus').textContent = 'Choose an image first.';
-          return;
-        }
-
-        $('btnClassify').disabled = true;
-        $('classifyStatus').textContent = 'Analyzing…';
-        $('classifyPreview').classList.add('hidden');
-
-        const thumbUrl = URL.createObjectURL(file);
-        $('classifyThumb').src = thumbUrl;
-
-        try {
-          const fd = new FormData();
-          fd.append('image', file);
-          const res = await fetch(apiBase() + '/api/debug/classify', { method: 'POST', body: fd });
-          const data = await res.json().catch(() => ({}));
-          if (!res.ok) {
-            throw new Error(data.error || data.details || 'HTTP ' + res.status);
-          }
-
-          const cat = data.finalCategory || 'neutral';
-          const badge = $('classifyBadge');
-          badge.textContent = cat;
-          badge.className =
-            'inline-flex px-3 py-1 rounded-full text-sm font-semibold ' + classifyBadgeClass(cat);
-          $('classifyRiskScore').textContent = String(data.combinedRiskScore ?? '—');
-
-          const vision = data.vision || {};
-          const ocr = data.ocr || {};
-          $('visionCategory').textContent = vision.category || '—';
-          $('visionRiskScore').textContent = String(vision.riskScore ?? '—');
-          const vLabels = vision.labels || {};
-          $('visionLabelsBody').innerHTML = Object.entries(vLabels)
-            .sort((a, b) => b[1] - a[1])
-            .map(
-              ([name, prob]) =>
-                `<tr><td class="py-1 capitalize">${escapeHtml(name)}</td>` +
-                `<td class="py-1 text-right">${(Number(prob) * 100).toFixed(1)}%</td></tr>`
-            )
-            .join('');
-
-          $('ocrCategory').textContent = ocr.category || '—';
-          $('ocrRiskScore').textContent = String(ocr.riskScore ?? '—');
-          $('ocrKeywords').textContent =
-            (ocr.matchedKeywords && ocr.matchedKeywords.length)
-              ? ocr.matchedKeywords.join(', ')
-              : '—';
-          const text = ocr.text || '';
-          $('ocrText').textContent = text.length > 200 ? text.slice(0, 200) + '…' : text || '(no text detected)';
-
-          $('classifyNote').textContent = data.note || '';
-          $('classifyPreview').classList.remove('hidden');
-          $('classifyStatus').textContent =
-            'Done — combined ' + (data.combinedRiskScore ?? '—') + '/100';
-          logActivity('POST', '/api/debug/classify', res.status);
-        } catch (err) {
-          $('classifyStatus').textContent = 'Error: ' + (err.message || String(err));
-          logActivity('POST', '/api/debug/classify', 0, err.message);
-        } finally {
-          URL.revokeObjectURL(thumbUrl);
-          $('btnClassify').disabled = false;
-        }
-      }
-
-      $('btnClassify').addEventListener('click', classifyDebugImage);
-
-      async function analyzeArabicOcrImage() {
-        const input = $('arabicOcrImage');
-        const file = input.files && input.files[0];
-        if (!file) {
-          $('arabicOcrStatus').textContent = 'Choose an image first.';
-          return;
-        }
-
-        $('btnArabicOcr').disabled = true;
-        $('arabicOcrStatus').textContent = 'Analyzing Arabic OCR…';
-        $('arabicOcrPreview').classList.add('hidden');
-
-        const thumbUrl = URL.createObjectURL(file);
-        $('arabicOcrThumb').src = thumbUrl;
-
-        try {
-          const fd = new FormData();
-          fd.append('image', file);
-          const res = await fetch(apiBase() + '/api/debug/arabic-ocr', { method: 'POST', body: fd });
-          const data = await res.json().catch(() => ({}));
-          if (!res.ok) {
-            throw new Error(data.error || data.details || 'HTTP ' + res.status);
-          }
-
-          const cat = data.category || 'neutral';
-          const badge = $('arabicOcrBadge');
-          badge.textContent = cat;
-          badge.className =
-            'inline-flex px-3 py-1 rounded-full text-sm font-semibold ' + classifyBadgeClass(cat);
-          $('arabicOcrRiskScore').textContent = String(data.riskScore ?? '—');
-          $('arabicOcrConfidence').textContent =
-            typeof data.confidence === 'number' ? data.confidence.toFixed(1) : '—';
-          $('arabicOcrKeywords').textContent =
-            (data.matchedKeywords && data.matchedKeywords.length)
-              ? data.matchedKeywords.join(', ')
-              : '—';
-
-          const text = data.text || '';
-          $('arabicOcrText').textContent = text.length > 500 ? text.slice(0, 500) + '…' : text || '(no text detected)';
-          $('arabicOcrNote').textContent = data.note || '';
-          $('arabicOcrPreview').classList.remove('hidden');
-          $('arabicOcrStatus').textContent =
-            'Done — ' + (data.riskFlag ? 'risk flagged' : 'neutral') + ', score ' + (data.riskScore ?? '—');
-          logActivity('POST', '/api/debug/arabic-ocr', res.status);
-        } catch (err) {
-          $('arabicOcrStatus').textContent = 'Error: ' + (err.message || String(err));
-          logActivity('POST', '/api/debug/arabic-ocr', 0, err.message);
-        } finally {
-          URL.revokeObjectURL(thumbUrl);
-          $('btnArabicOcr').disabled = false;
-        }
-      }
-
-      $('btnArabicOcr').addEventListener('click', analyzeArabicOcrImage);
 
       $('btnRefresh').addEventListener('click', refreshAll);
 

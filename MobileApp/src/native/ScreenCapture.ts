@@ -18,6 +18,8 @@ export interface ScreenCaptureNativeModule {
   isPermissionGranted(): Promise<boolean>;
   startCapture(intervalMs: number): Promise<boolean>;
   captureNow(): Promise<boolean>;
+  /** Force the next acquired native frame to bypass the perceptual-hash frame-skip gate. */
+  forceNextCapture(): Promise<void>;
   stopCapture(): Promise<boolean>;
   pauseCapture(): Promise<boolean>;
   resumeCapture(): Promise<boolean>;

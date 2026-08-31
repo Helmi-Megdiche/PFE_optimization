@@ -64,6 +64,18 @@ import {
   resetMissionCaptureSession,
   unregisterMissionCaptureHandlers,
 } from '../utils/missionCaptureSession';
+import {
+  createCaptureCoordinator,
+  CaptureReason,
+  isForceCaptureReason,
+  type CaptureCoordinator,
+} from '../capture/captureCoordinator';
+import { createWindowEventFilter } from '../capture/windowEventFilter';
+import { useAccessibilityEvents } from './useAccessibilityEvents';
+import type {
+  AccessibilityKeyboardChangedEvent,
+  AccessibilityWindowChangedEvent,
+} from '../native/SafeGuardAccessibility';
 import type {
   CaptureCycleResult,
   ScreenEventPayload,
@@ -71,11 +83,16 @@ import type {
 } from '../types/screenMonitor';
 
 const APP_POLL_MS = 1_000;
-const CAPTURE_DEBOUNCE_MS = 5_000;
 const FOLLOW_UP_DELAY_MS = 5_000;
-/** Skip follow-up if a capture completed within this window. */
-const FOLLOW_UP_MIN_GAP_MS = 2_000;
 const DEFAULT_MAX_TEXT = 500;
+/**
+ * When accessibility is connected, app-switch captures are driven by its window
+ * events and the 1s poll's own app-switch triggers are suppressed. If those events
+ * go silent for this long (service crashed/unbound while the app stayed foreground,
+ * before the next AppState→active refresh flips `connected`), the poll resumes
+ * firing so monitoring never goes blind.
+ */
+const A11Y_STALE_MS = 60_000;
 
 /** Never cache or report System UI / launchers — they stick after consent or home. */
 const SYSTEM_UI_PACKAGE = 'com.android.systemui';
@@ -161,7 +178,6 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
   >(async () => ({ success: false }));
   const isStartingRef = useRef(false);
   const isMonitoringRef = useRef(false);
-  const lastCaptureMsRef = useRef(0);
   const lastAppPackageRef = useRef<string | null>(null);
   const lastAppPackageUpdatedAtRef = useRef(0);
   const missionEndedAtRef = useRef(0);
@@ -173,8 +189,28 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
   const followUpTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const appPollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const lastResetTimeRef = useRef<number>(0);
-  const pendingAppSwitchCaptureRef = useRef(false);
   const visitedLauncherRef = useRef(false);
+
+  /** Accessibility window-event driven app-switch path (falls back to the 1s poll). */
+  const windowEventFilterRef = useRef(
+    createWindowEventFilter({ now: () => Date.now() }),
+  );
+  const a11yConnectedRef = useRef(false);
+  /** Wall-clock of the last window event *received* (pre-filter) — poll staleness watchdog. */
+  const lastA11yWindowEventAtMs = useRef(0);
+  /** Last keyboard visibility we pushed to the coordinator — lets us detect a stuck latch. */
+  const a11yKeyboardVisibleRef = useRef(false);
+
+  const coordinatorRef = useRef<CaptureCoordinator | null>(null);
+  if (!coordinatorRef.current) {
+    coordinatorRef.current = createCaptureCoordinator({
+      now: () => Date.now(),
+      isMonitoring: () => isMonitoringRef.current,
+      isMissionPaused: isMissionCapturePaused,
+      isProcessing: () => isProcessingRef.current,
+      log: (event, data) => scLog(event, data),
+    });
+  }
 
   useEffect(() => {
     isMonitoringRef.current = isMonitoring;
@@ -221,32 +257,28 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
     }
   }, [clearCaptureTimers]);
 
-  const tryCaptureNow = useCallback(async (reason: string): Promise<void> => {
-    if (!isMonitoringRef.current || isMissionCapturePaused()) {
-      return;
-    }
-    if (isProcessingRef.current) {
-      pendingAppSwitchCaptureRef.current = true;
-      scLog('Capture deferred — OCR in progress', { reason });
-      return;
-    }
-    const now = Date.now();
-    if (now - lastCaptureMsRef.current < CAPTURE_DEBOUNCE_MS) {
-      scLog('Capture skipped (debounce)', {
-        reason,
-        elapsedMs: now - lastCaptureMsRef.current,
-      });
-      return;
-    }
-    try {
-      const triggered = await getScreenCaptureModule().captureNow();
-      if (triggered) {
-        scLog('Capture triggered', { reason });
+  const tryCaptureNow = useCallback(
+    async (reason: CaptureReason): Promise<void> => {
+      const decision = coordinatorRef.current!.requestCapture(reason);
+      if (!decision.allowed) {
+        return;
       }
-    } catch (err) {
-      scWarn('captureNow failed', { reason, err });
-    }
-  }, []);
+      if (isForceCaptureReason(decision.reason)) {
+        getScreenCaptureModule()
+          .forceNextCapture()
+          .catch(err => scWarn('forceNextCapture failed', {reason, err}));
+      }
+      try {
+        const triggered = await getScreenCaptureModule().captureNow();
+        if (triggered) {
+          scLog('Capture triggered', { reason });
+        }
+      } catch (err) {
+        scWarn('captureNow failed', { reason, err });
+      }
+    },
+    [],
+  );
 
   const resetPeriodicTimer = useCallback(() => {
     const now = Date.now();
@@ -271,7 +303,7 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
         if (!isMonitoringRef.current) {
           return;
         }
-        void tryCaptureNow('periodic_adaptive').finally(() => {
+        void tryCaptureNow(CaptureReason.PERIODIC_ADAPTIVE).finally(() => {
           if (isMonitoringRef.current) {
             scheduleTick();
           }
@@ -358,12 +390,7 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
       }
       followUpTimerRef.current = setTimeout(() => {
         followUpTimerRef.current = null;
-        const elapsed = Date.now() - lastCaptureMsRef.current;
-        if (elapsed < FOLLOW_UP_MIN_GAP_MS) {
-          scLog('Follow-up skipped — capture too recent', { elapsedMs: elapsed });
-          return;
-        }
-        void tryCaptureNow('app_switch_follow_up');
+        void tryCaptureNow(CaptureReason.APP_SWITCH_FOLLOW_UP);
       }, delayMs);
       scLog('Follow-up capture scheduled', { delayMs });
     },
@@ -371,12 +398,95 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
   );
 
   const triggerAppSwitchCapture = useCallback(
-    async (reason: string): Promise<void> => {
+    async (reason: CaptureReason): Promise<void> => {
       await tryCaptureNow(reason);
       scheduleFollowUpCapture(FOLLOW_UP_DELAY_MS);
     },
     [tryCaptureNow, scheduleFollowUpCapture],
   );
+
+  /**
+   * Accessibility window event — the fast app-switch path. When connected this
+   * replaces the 1s poll's package-change trigger (the poll keeps running for its
+   * foreground-cache side effects). Every event bumps the liveness timestamp before
+   * filtering, so even filtered events keep the poll suppressed.
+   */
+  const handleA11yWindowChanged = useCallback(
+    (event: AccessibilityWindowChangedEvent) => {
+      lastA11yWindowEventAtMs.current = Date.now();
+      if (!a11yConnectedRef.current) {
+        return;
+      }
+      if (!isMonitoringRef.current || isMissionCapturePaused()) {
+        return;
+      }
+      const filter = windowEventFilterRef.current;
+      const previousPkg = filter.getLastAcceptedPackage();
+      const decision = filter.accept(event.packageName);
+      if (!decision.accept) {
+        scLog('a11y.window.filtered', {
+          packageName: event.packageName,
+          reason: decision.reason,
+        });
+        return;
+      }
+
+      const pkg = event.packageName;
+      const wasLauncher = previousPkg !== null && isLauncherPackage(previousPkg);
+      const nowLauncher = isLauncherPackage(pkg);
+
+      // Keep attribution current — mirrors the poll's writes at the tail of its tick.
+      if (
+        isUsableForegroundPackage(pkg) &&
+        pkg !== APP_OWN_PACKAGE &&
+        !nowLauncher
+      ) {
+        lastAppPackageRef.current = pkg;
+        lastAppPackageUpdatedAtRef.current = Date.now();
+        setLastForegroundApp(pkg);
+      }
+
+      const reason =
+        wasLauncher && !nowLauncher
+          ? CaptureReason.APP_SWITCH_LAUNCHER_RETURN
+          : CaptureReason.APP_SWITCH;
+      scLog('a11y.window.accepted', { from: previousPkg, to: pkg, reason });
+      void triggerAppSwitchCapture(reason);
+      refreshIntervalForApp();
+    },
+    [triggerAppSwitchCapture, refreshIntervalForApp],
+  );
+
+  /**
+   * Accessibility keyboard event — drives the coordinator's routine-capture
+   * suppression while the soft keyboard is up. Firing a capture on keyboard-close is
+   * deliberately NOT done here (candidate for the scroll-settle task); no settle timer.
+   */
+  const handleA11yKeyboardChanged = useCallback(
+    (event: AccessibilityKeyboardChangedEvent) => {
+      coordinatorRef.current!.setKeyboardVisible(event.visible);
+      a11yKeyboardVisibleRef.current = event.visible;
+    },
+    [],
+  );
+
+  const { connected: a11yConnected } = useAccessibilityEvents({
+    onWindowChanged: handleA11yWindowChanged,
+    onKeyboardChanged: handleA11yKeyboardChanged,
+  });
+
+  useEffect(() => {
+    const wasConnected = a11yConnectedRef.current;
+    a11yConnectedRef.current = a11yConnected;
+    if (wasConnected && !a11yConnected) {
+      // Service disconnected/unbound/crashed. If the keyboard was open, no
+      // visible:false will ever arrive — clear the latch so routine captures
+      // (PERIODIC_*, CONTENT_CHANGE, SCROLL_SETTLED) are not suppressed forever.
+      coordinatorRef.current!.setKeyboardVisible(false);
+      a11yKeyboardVisibleRef.current = false;
+      scLog('a11y disconnected — keyboard suppression latch cleared');
+    }
+  }, [a11yConnected]);
 
   const processCapturedFrame = useCallback(
     async (event: ScreenCapturedEvent): Promise<CaptureCycleResult> => {
@@ -842,7 +952,7 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
           scLog('Risky capture — no mission in API response', { combinedRiskScore });
         }
         setLastCaptureAt(payload.timestamp);
-        lastCaptureMsRef.current = Date.now();
+        coordinatorRef.current!.onFrameAccepted(Date.now());
         setLastError(null);
 
         updateRiskAndInterval(combinedRiskScore);
@@ -883,9 +993,11 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
           setTimeout(() => {
             void processCapturedFrameRef.current(deferredFrame);
           }, 0);
-        } else if (pendingAppSwitchCaptureRef.current && isMonitoringRef.current) {
-          pendingAppSwitchCaptureRef.current = false;
-          void triggerAppSwitchCapture('app_switch_deferred');
+        } else if (
+          coordinatorRef.current!.takePendingReason() != null &&
+          isMonitoringRef.current
+        ) {
+          void triggerAppSwitchCapture(CaptureReason.APP_SWITCH_DEFERRED);
         }
         if (!__DEV__) {
           void getScreenCaptureModule().deleteFile(filePath).catch(() => undefined);
@@ -1028,18 +1140,48 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
           pkg,
         );
 
+        // When accessibility is connected AND its window events are still flowing,
+        // it owns the app-switch trigger; the poll only maintains the foreground
+        // cache below. If those events go stale, the poll takes back over.
+        const a11yDriving =
+          a11yConnectedRef.current &&
+          Date.now() - lastA11yWindowEventAtMs.current < A11Y_STALE_MS;
+
         if (launcherReturn) {
           visitedLauncherRef.current = false;
-          scLog('Same app resumed after launcher — capturing', { package: pkg });
-          await triggerAppSwitchCapture('app_switch_launcher_return');
+          if (a11yDriving) {
+            scLog('Poll app-switch trigger suppressed (a11y driving)', {
+              package: pkg,
+              kind: 'launcher_return',
+            });
+          } else {
+            if (a11yConnectedRef.current) {
+              scLog('Poll fallback — a11y events stale', { package: pkg });
+            }
+            scLog('Same app resumed after launcher — capturing', { package: pkg });
+            await triggerAppSwitchCapture(CaptureReason.APP_SWITCH_LAUNCHER_RETURN);
+          }
         } else if (appChanged) {
-          scLog('App switch detected', {
-            from: previousPkg,
-            to: pkg,
-            label: fg.appLabel,
-            appState: AppState.currentState,
-          });
-          await triggerAppSwitchCapture('app_switch');
+          if (a11yDriving) {
+            scLog('Poll app-switch trigger suppressed (a11y driving)', {
+              from: previousPkg,
+              to: pkg,
+            });
+          } else {
+            if (a11yConnectedRef.current) {
+              scLog('Poll fallback — a11y events stale', {
+                from: previousPkg,
+                to: pkg,
+              });
+            }
+            scLog('App switch detected', {
+              from: previousPkg,
+              to: pkg,
+              label: fg.appLabel,
+              appState: AppState.currentState,
+            });
+            await triggerAppSwitchCapture(CaptureReason.APP_SWITCH);
+          }
         }
 
         if (!isLauncherPackage(pkg)) {
@@ -1095,11 +1237,14 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
       setDynamicIntervalMs(RISK_INTERVAL_LOW_MS);
       setAppCategory(null);
       setAvgRiskScore(null);
-      lastCaptureMsRef.current = 0;
+      coordinatorRef.current!.reset();
+      windowEventFilterRef.current.reset();
+      // Seed liveness now so a quiet first minute is not treated as a stale a11y path.
+      lastA11yWindowEventAtMs.current = Date.now();
+      a11yKeyboardVisibleRef.current = false;
       lastAppPackageRef.current = APP_OWN_PACKAGE;
       lastAppPackageUpdatedAtRef.current = Date.now();
       visitedLauncherRef.current = false;
-      pendingAppSwitchCaptureRef.current = false;
       setLastForegroundApp(APP_OWN_PACKAGE);
 
       setPermissionGranted(true);
@@ -1130,6 +1275,12 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
     resetMissionPresentationGuard();
     clearAdaptiveTimers();
     resetForegroundLookup();
+    coordinatorRef.current!.reset();
+    windowEventFilterRef.current.reset();
+    // Force-clear the keyboard latch: if the service died with the keyboard open no
+    // visible:false will arrive to clear it.
+    coordinatorRef.current!.setKeyboardVisible(false);
+    a11yKeyboardVisibleRef.current = false;
     try {
       await getScreenCaptureModule().stopCapture();
     } catch (err) {
@@ -1266,7 +1417,7 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
               package: fg.packageName,
             });
           }
-          await triggerAppSwitchCapture('appstate_background');
+          await triggerAppSwitchCapture(CaptureReason.APPSTATE_BACKGROUND);
         })();
         return;
       }

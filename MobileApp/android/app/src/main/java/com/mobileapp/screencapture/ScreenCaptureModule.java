@@ -62,6 +62,11 @@ public class ScreenCaptureModule extends ReactContextBaseJavaModule
     private static final String VIRTUAL_DISPLAY_NAME = "PFE_ScreenCapture";
     private static final String CAPTURES_DIR = "screen_captures";
 
+    /** Max dHash Hamming distance still considered "same screen" — skip the frame. */
+    private static final int HASH_CHANGE_THRESHOLD = 3;
+    /** Force-process a frame if this long has passed since the last processed one. */
+    private static final long HASH_STALENESS_MS = 90_000L;
+
     private final ReactApplicationContext reactContext;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
@@ -87,6 +92,18 @@ public class ScreenCaptureModule extends ReactContextBaseJavaModule
     private Runnable captureLoopRunnable;
     private Promise permissionPromise;
     private long lastCaptureEmittedAtMs = 0;
+
+    // Perceptual-hash frame-skip gate. Accessed on captureThread (gate) and the JS-call
+    // thread (forceNextCapture / teardown reset); volatile / atomic is sufficient.
+    private volatile long lastProcessedHash = 0L;
+    private volatile boolean hasLastHash = false;
+    private volatile long lastProcessedAtMs = 0L;
+    // Known nuance: JS calls forceNextCapture() before captureNow(), but captureNow may
+    // reject on its own MIN_CAPTURE_INTERVAL_MS debounce, so no frame consumes this flag;
+    // it then persists until the next frame arrives (likely a periodic one) and that
+    // frame bypasses the hash gate. Accepted for now — a symptom of the JS/native
+    // debounce split, to be resolved in a later task.
+    private final AtomicBoolean forceNextCapture = new AtomicBoolean(false);
 
     /** Singleton for optional MainActivity forwarding. */
     private static volatile ScreenCaptureModule instance;
@@ -386,6 +403,18 @@ public class ScreenCaptureModule extends ReactContextBaseJavaModule
         }
     }
 
+    /**
+     * Forces the next acquired frame to bypass the perceptual-hash frame-skip gate.
+     * Fire-and-forget from JS on app-switch / browser-navigation capture reasons so a
+     * context change always scans even if the pixels happen to be near-identical.
+     */
+    @ReactMethod
+    public void forceNextCapture(Promise promise) {
+        forceNextCapture.set(true);
+        logJs("forceNextCapture() — next frame bypasses hash gate");
+        promise.resolve(null);
+    }
+
   // ---------------------------------------------------------------------------
   // Lifecycle — keep capturing in background (FGS + MediaProjection)
   // ---------------------------------------------------------------------------
@@ -476,6 +505,34 @@ public class ScreenCaptureModule extends ReactContextBaseJavaModule
                     isFrameInProgress.set(false);
                     return;
                 }
+
+                // Perceptual-hash gate: discard frames whose screen has not meaningfully
+                // changed, before any JPEG write / bridge crossing / OCR. The hash stays
+                // in native memory only. The finally block below still closes the image
+                // and clears isFrameInProgress on the skip return path.
+                Image.Plane plane0 = image.getPlanes()[0];
+                long hash = FrameHasher.computeDHash(
+                        plane0.getBuffer(),
+                        plane0.getRowStride(),
+                        plane0.getPixelStride(),
+                        image.getWidth(),
+                        image.getHeight());
+                long nowMs = System.currentTimeMillis();
+                int hamming = hasLastHash
+                        ? FrameHasher.hammingDistance(hash, lastProcessedHash)
+                        : 64;
+                boolean process = forceNextCapture.getAndSet(false)
+                        || !hasLastHash
+                        || (nowMs - lastProcessedAtMs >= HASH_STALENESS_MS)
+                        || hamming > HASH_CHANGE_THRESHOLD;
+                if (!process) {
+                    logJs("frame.skipped.unchanged hamming=" + hamming);
+                    return;
+                }
+                lastProcessedHash = hash;
+                hasLastHash = true;
+                lastProcessedAtMs = nowMs;
+
                 String path = saveImageToJpeg(image);
                 if (path != null) {
                     emitScreenCaptured(path);
@@ -624,6 +681,12 @@ public class ScreenCaptureModule extends ReactContextBaseJavaModule
             mediaProjection = null;
         }
         isProjectionReady.set(false);
+        // Reset the perceptual-hash gate so a new monitoring session always processes
+        // its first frame.
+        hasLastHash = false;
+        lastProcessedHash = 0L;
+        lastProcessedAtMs = 0L;
+        forceNextCapture.set(false);
     }
 
   // ---------------------------------------------------------------------------
