@@ -332,6 +332,56 @@ describe('isForceCaptureReason', () => {
   });
 });
 
+describe('captureCoordinator — SCROLL_SETTLED routing (A3c-3)', () => {
+  it('routes through requestCapture and is allowed when nothing suppresses it', () => {
+    const {coordinator} = makeHarness();
+    // fresh clock, monitoring on, not processing, keyboard down, past debounce
+    // (lastAcceptedAtMs starts at -Infinity)
+    expect(coordinator.requestCapture(CaptureReason.SCROLL_SETTLED)).toEqual({
+      allowed: true,
+      reason: CaptureReason.SCROLL_SETTLED,
+    });
+  });
+
+  it('is keyboard-suppressed (pinned): keyboard up => KEYBOARD_SUPPRESSED, down => allowed', () => {
+    const {coordinator} = makeHarness();
+    coordinator.setKeyboardVisible(true);
+    expect(coordinator.requestCapture(CaptureReason.SCROLL_SETTLED)).toEqual({
+      allowed: false,
+      skipReason: CaptureSkipReason.KEYBOARD_SUPPRESSED,
+    });
+    coordinator.setKeyboardVisible(false);
+    expect(
+      coordinator.requestCapture(CaptureReason.SCROLL_SETTLED).allowed,
+    ).toBe(true);
+  });
+
+  it('is not a force reason — never arms the hash-gate bypass', () => {
+    const {coordinator} = makeHarness();
+    expect(coordinator.requestCapture(CaptureReason.SCROLL_SETTLED).allowed).toBe(
+      true,
+    );
+    expect(coordinator.isForceArmed()).toBe(false);
+  });
+
+  it('honours the 5s debounce like every non-follow-up reason', () => {
+    const {clock, coordinator} = makeHarness();
+    expect(coordinator.requestCapture(CaptureReason.SCROLL_SETTLED).allowed).toBe(
+      true,
+    );
+    coordinator.onFrameAccepted(clock.t);
+    clock.t = 4_999;
+    expect(coordinator.requestCapture(CaptureReason.SCROLL_SETTLED)).toEqual({
+      allowed: false,
+      skipReason: CaptureSkipReason.DEBOUNCED,
+    });
+    clock.t = 5_000;
+    expect(coordinator.requestCapture(CaptureReason.SCROLL_SETTLED).allowed).toBe(
+      true,
+    );
+  });
+});
+
 describe('captureCoordinator — native rejection', () => {
   it('native interval-floor rejection does not advance the debounce clock', () => {
     const {clock, coordinator} = makeHarness();

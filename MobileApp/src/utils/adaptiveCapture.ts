@@ -12,10 +12,17 @@ export const RISK_HISTORY_SIZE = 3;
 /**
  * The single cadence the native periodic loop emits `onNativePeriodicTick` at.
  * JS subsamples it down to the effective adaptive interval (10/15/20/120s, or 0
- * = category-disabled) via {@link shouldEmitPeriodicCapture}. Set to the fastest
- * useful effective interval so subsampling can realize every slower one.
+ * = category-disabled) via {@link shouldEmitPeriodicCapture}.
+ *
+ * Must be a common divisor of *every* effective interval (10/15/20/120k) so
+ * subsampling can realize each one exactly. A3c-2 set this to
+ * `RISK_INTERVAL_HIGH_MS` (10k) and `15000 % 10000 !== 0`, so a 15s browser_social
+ * target quantized up to the 20s tick — device-confirmed 33% slower browser
+ * scanning. 5s divides 10/15/20/120 exactly and removes the whole quantization
+ * class. Native floor is a strict `intervalMs < 5_000` (ScreenCaptureModule.java),
+ * so 5000 passes with no native change.
  */
-export const NATIVE_TICK_INTERVAL_MS = RISK_INTERVAL_HIGH_MS;
+export const NATIVE_TICK_INTERVAL_MS = 5_000;
 
 /**
  * Subsample gate for native periodic ticks. Returns true when a tick should be
@@ -41,7 +48,7 @@ export function shouldEmitPeriodicCapture(
  * pass. Sits well above the ~40s worst-case legitimate `processCapturedFrame`
  * (2.5s foreground lookup + 25s vision + 12s API POST) and ~78x a healthy
  * ~400ms frame, so it only ever fires on a genuinely wedged frame.
- * 6 x {@link NATIVE_TICK_INTERVAL_MS}.
+ * 12 x {@link NATIVE_TICK_INTERVAL_MS}.
  */
 export const OCR_LOCK_LIVENESS_MS = 60_000;
 
@@ -103,6 +110,99 @@ export function decideTickAction(params: {
     return 'emitCapture';
   }
   return 'noop';
+}
+
+/* ------------------------------------------------------------------ *
+ *  Scroll-settled capture (A3c-3)                                     *
+ * ------------------------------------------------------------------ *
+ * Tick-driven settle: `onAccessibilityScroll` records a timestamp +
+ * arms; the native periodic tick (the one JS clock that survives
+ * backgrounding — RN freezes setTimeout/setInterval there) evaluates
+ * `decideScrollSettle` on every `noop` tick and emits `SCROLL_SETTLED`
+ * once the scroll has been quiet for `SCROLL_SETTLE_MS`. No JS timer.
+ */
+
+/** A scroll burst must be quiet this long before it counts as "settled". */
+export const SCROLL_SETTLE_MS = 2_000;
+/**
+ * Floor for the gap between two scroll-driven captures. The tick handler passes
+ * `max(this, effectivePeriodicIntervalMs)` so lower-value categories (education
+ * at 120s) don't get a settle capture every 10s. Stands on its own — stricter
+ * than the coordinator's 5s debounce, not reliant on it.
+ */
+export const SCROLL_SETTLE_COOLDOWN_MS = 10_000;
+
+export interface ScrollSettleState {
+  /** Wall-clock ms of the most recent scroll event; 0 = none seen. */
+  lastScrollAtMs: number;
+  /** A scroll burst is awaiting settle. */
+  armed: boolean;
+  /** Wall-clock ms of the last emitted SCROLL_SETTLED; 0 = never. */
+  lastEmitAtMs: number;
+}
+
+export const initialScrollSettleState = (): ScrollSettleState => ({
+  lastScrollAtMs: 0,
+  armed: false,
+  lastEmitAtMs: 0,
+});
+
+/** Fold one inbound scroll event into the state: stamp + arm. */
+export const recordScrollEvent = (
+  s: ScrollSettleState,
+  nowMs: number,
+): ScrollSettleState => ({ ...s, lastScrollAtMs: nowMs, armed: true });
+
+/**
+ * Tick-driven scroll-settle decision. Pure; evaluated from the native tick
+ * handler on `noop` ticks. Branch order:
+ *   not armed            → no emit
+ *   periodic disabled     → DISARM (category turned periodic off; drop the arm)
+ *   still scrolling        → no emit, STAY ARMED  (now - lastScroll < settleMs)
+ *   periodic just fired    → DEFER (stay armed): a periodic frame within
+ *                            `periodicGuardMs` already covers this screen, and
+ *                            emitting now would hit the native 5s floor with the
+ *                            arm consumed and no retry
+ *   inside cooldown        → DEFER (stay armed): emit once cooldown expires
+ *   else                  → EMIT, disarm, stamp `lastEmitAtMs`
+ */
+export function decideScrollSettle(params: {
+  state: ScrollSettleState;
+  nowMs: number;
+  /** dynamicIntervalMsRef.current; 0 ⇒ category disables periodic capture. */
+  periodicIntervalMs: number;
+  /** lastPeriodicPassAtRef.current. */
+  lastPeriodicPassAtMs: number;
+  settleMs?: number;
+  /** Caller passes `max(SCROLL_SETTLE_COOLDOWN_MS, periodicIntervalMs)`. */
+  cooldownMs?: number;
+  /** = CAPTURE_DEBOUNCE_MS. */
+  periodicGuardMs?: number;
+}): { emit: boolean; state: ScrollSettleState } {
+  const { state: s, nowMs } = params;
+  const settleMs = params.settleMs ?? SCROLL_SETTLE_MS;
+  const cooldownMs = params.cooldownMs ?? SCROLL_SETTLE_COOLDOWN_MS;
+  const periodicGuardMs = params.periodicGuardMs ?? 5_000;
+
+  if (!s.armed) {
+    return { emit: false, state: s };
+  }
+  if (params.periodicIntervalMs <= 0) {
+    return { emit: false, state: { ...s, armed: false } };
+  }
+  if (nowMs - s.lastScrollAtMs < settleMs) {
+    return { emit: false, state: s };
+  }
+  if (nowMs - params.lastPeriodicPassAtMs <= periodicGuardMs) {
+    return { emit: false, state: s };
+  }
+  if (s.lastEmitAtMs > 0 && nowMs - s.lastEmitAtMs < cooldownMs) {
+    return { emit: false, state: s };
+  }
+  return {
+    emit: true,
+    state: { armed: false, lastScrollAtMs: s.lastScrollAtMs, lastEmitAtMs: nowMs },
+  };
 }
 
 /**

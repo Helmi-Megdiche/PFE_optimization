@@ -1,16 +1,43 @@
 import {
   computeAdaptiveIntervalMs,
   computeEffectiveAdaptiveInterval,
+  decideScrollSettle,
   decideTickAction,
+  initialScrollSettleState,
   NATIVE_TICK_INTERVAL_MS,
   OCR_LOCK_LIVENESS_MS,
   pushRiskScore,
+  recordScrollEvent,
   RISK_INTERVAL_HIGH_MS,
   RISK_INTERVAL_LOW_MS,
   RISK_INTERVAL_MEDIUM_MS,
+  SCROLL_SETTLE_COOLDOWN_MS,
+  SCROLL_SETTLE_MS,
   shouldEmitPeriodicCapture,
   shouldForceReleaseProcessingLock,
 } from '../src/utils/adaptiveCapture';
+
+/**
+ * Run a native-tick train through the subsample gate and return the realized
+ * spacing (ms) between the ticks that passed. Mirrors the hook's tick handler:
+ * `lastPass` only advances on a pass.
+ */
+function realizedSpacings(tickMs: number, targetMs: number, ticks = 120): number[] {
+  let lastPass = 0; // seed at 0 (not -Infinity) so we measure steady-state spacing
+  const passAt: number[] = [];
+  for (let k = 1; k <= ticks; k++) {
+    const now = k * tickMs;
+    if (shouldEmitPeriodicCapture(now, lastPass, targetMs)) {
+      passAt.push(now);
+      lastPass = now;
+    }
+  }
+  const gaps: number[] = [];
+  for (let i = 1; i < passAt.length; i++) {
+    gaps.push(passAt[i] - passAt[i - 1]);
+  }
+  return gaps;
+}
 
 describe('adaptiveCapture', () => {
   it('uses 10s interval when average risk > 70', () => {
@@ -98,10 +125,39 @@ describe('shouldEmitPeriodicCapture (native-tick subsample gate)', () => {
     ).toBe(true);
   });
 
-  it('NATIVE_TICK_INTERVAL_MS is the fastest effective interval so subsampling can realize every slower one', () => {
-    expect(NATIVE_TICK_INTERVAL_MS).toBe(RISK_INTERVAL_HIGH_MS);
-    expect(NATIVE_TICK_INTERVAL_MS).toBeLessThanOrEqual(RISK_INTERVAL_MEDIUM_MS);
-    expect(NATIVE_TICK_INTERVAL_MS).toBeLessThanOrEqual(RISK_INTERVAL_LOW_MS);
+  it('NATIVE_TICK_INTERVAL_MS is 5s and divides every effective interval exactly (no quantization)', () => {
+    expect(NATIVE_TICK_INTERVAL_MS).toBe(5_000);
+    for (const target of [
+      RISK_INTERVAL_HIGH_MS,
+      RISK_INTERVAL_MEDIUM_MS,
+      RISK_INTERVAL_LOW_MS,
+      120_000,
+    ]) {
+      expect(target % NATIVE_TICK_INTERVAL_MS).toBe(0);
+    }
+  });
+});
+
+describe('native-tick subsample realizes each target exactly (A3c-2 quantization fix)', () => {
+  it.each([
+    [RISK_INTERVAL_HIGH_MS],
+    [RISK_INTERVAL_MEDIUM_MS],
+    [RISK_INTERVAL_LOW_MS],
+    [120_000],
+  ])('a %ims target is realized with exact %ims spacing on the 5s tick', (target) => {
+    const gaps = realizedSpacings(NATIVE_TICK_INTERVAL_MS, target);
+    expect(gaps.length).toBeGreaterThan(2);
+    for (const gap of gaps) {
+      expect(gap).toBe(target);
+    }
+  });
+
+  it('permanent guard: a 10s tick CANNOT realize a 15s target — it quantizes up to 20s (the shipped A3c-2 bug)', () => {
+    const gaps = realizedSpacings(10_000, RISK_INTERVAL_MEDIUM_MS);
+    expect(gaps.length).toBeGreaterThan(2);
+    for (const gap of gaps) {
+      expect(gap).toBe(20_000);
+    }
   });
 });
 
@@ -242,5 +298,164 @@ describe('decideTickAction (native-tick action: liveness backstop before subsamp
         dynamicIntervalMs: 20_000,
       }),
     ).toBe('emitCapture');
+  });
+});
+
+describe('recordScrollEvent', () => {
+  it('stamps lastScrollAtMs, arms, and preserves lastEmitAtMs', () => {
+    const s0 = { ...initialScrollSettleState(), lastEmitAtMs: 4_000 };
+    const s1 = recordScrollEvent(s0, 9_000);
+    expect(s1).toEqual({ lastScrollAtMs: 9_000, armed: true, lastEmitAtMs: 4_000 });
+  });
+});
+
+describe('decideScrollSettle (tick-driven scroll settle, A3c-3)', () => {
+  const base = {
+    periodicIntervalMs: 20_000, // default-category app: periodic on, 20s
+    lastPeriodicPassAtMs: Number.NEGATIVE_INFINITY, // no recent periodic frame
+    settleMs: SCROLL_SETTLE_MS,
+    cooldownMs: SCROLL_SETTLE_COOLDOWN_MS,
+    periodicGuardMs: 5_000,
+  };
+
+  it('does not emit when not armed, state unchanged', () => {
+    const state = initialScrollSettleState();
+    const out = decideScrollSettle({ ...base, state, nowMs: 1_000_000 });
+    expect(out).toEqual({ emit: false, state });
+  });
+
+  it('does not emit while still scrolling (last scroll < settleMs ago), stays armed', () => {
+    const state = { lastScrollAtMs: 100_000, armed: true, lastEmitAtMs: 0 };
+    const out = decideScrollSettle({
+      ...base,
+      state,
+      nowMs: 100_000 + SCROLL_SETTLE_MS - 1,
+    });
+    expect(out.emit).toBe(false);
+    expect(out.state.armed).toBe(true);
+    expect(out.state.lastScrollAtMs).toBe(100_000);
+  });
+
+  it('emits once settled with no periodic recency and no cooldown; disarms and stamps lastEmitAtMs', () => {
+    const state = { lastScrollAtMs: 100_000, armed: true, lastEmitAtMs: 0 };
+    const now = 100_000 + SCROLL_SETTLE_MS;
+    const out = decideScrollSettle({ ...base, state, nowMs: now });
+    expect(out.emit).toBe(true);
+    expect(out.state).toEqual({
+      armed: false,
+      lastScrollAtMs: 100_000,
+      lastEmitAtMs: now,
+    });
+  });
+
+  it('disarms without emitting when the category disables periodic (periodicIntervalMs = 0)', () => {
+    const state = { lastScrollAtMs: 100_000, armed: true, lastEmitAtMs: 0 };
+    const out = decideScrollSettle({
+      ...base,
+      state,
+      periodicIntervalMs: 0,
+      nowMs: 200_000,
+    });
+    expect(out.emit).toBe(false);
+    expect(out.state.armed).toBe(false);
+  });
+
+  it('DEFERS (stays armed, no emit) when a periodic frame fired within periodicGuardMs — flaw 1', () => {
+    const state = { lastScrollAtMs: 100_000, armed: true, lastEmitAtMs: 0 };
+    const now = 100_000 + SCROLL_SETTLE_MS + 3_000;
+    const out = decideScrollSettle({
+      ...base,
+      state,
+      lastPeriodicPassAtMs: now - 5_000, // exactly on the guard boundary
+      nowMs: now,
+    });
+    expect(out.emit).toBe(false);
+    expect(out.state.armed).toBe(true);
+    expect(out.state.lastEmitAtMs).toBe(0); // untouched
+  });
+
+  it('emits once the periodic frame is older than periodicGuardMs', () => {
+    const state = { lastScrollAtMs: 100_000, armed: true, lastEmitAtMs: 0 };
+    const now = 100_000 + SCROLL_SETTLE_MS + 3_000;
+    const out = decideScrollSettle({
+      ...base,
+      state,
+      lastPeriodicPassAtMs: now - 5_001, // just past the guard
+      nowMs: now,
+    });
+    expect(out.emit).toBe(true);
+  });
+
+  it('DEFERS (stays armed) when settled but still inside the cooldown — defer, not drop (flaw 3)', () => {
+    const state = { lastScrollAtMs: 100_000, armed: true, lastEmitAtMs: 95_000 };
+    const now = 100_000 + SCROLL_SETTLE_MS; // settled, but 7s since last emit < 10s cooldown
+    const out = decideScrollSettle({ ...base, state, nowMs: now });
+    expect(out.emit).toBe(false);
+    expect(out.state.armed).toBe(true);
+    expect(out.state.lastEmitAtMs).toBe(95_000);
+  });
+
+  it('emits once the cooldown has expired (deferral resolves on a later tick)', () => {
+    const state = { lastScrollAtMs: 100_000, armed: true, lastEmitAtMs: 95_000 };
+    const now = 95_000 + SCROLL_SETTLE_COOLDOWN_MS; // cooldown boundary
+    const out = decideScrollSettle({ ...base, state, nowMs: now });
+    expect(out.emit).toBe(true);
+    expect(out.state.lastEmitAtMs).toBe(now);
+  });
+
+  it('cooldown boundary: === cooldownMs emits (strict <), cooldownMs - 1 defers', () => {
+    const state = { lastScrollAtMs: 0, armed: true, lastEmitAtMs: 50_000 };
+    const atBoundary = decideScrollSettle({
+      ...base,
+      state,
+      nowMs: 50_000 + SCROLL_SETTLE_COOLDOWN_MS,
+    });
+    expect(atBoundary.emit).toBe(true);
+    const justInside = decideScrollSettle({
+      ...base,
+      state,
+      nowMs: 50_000 + SCROLL_SETTLE_COOLDOWN_MS - 1,
+    });
+    expect(justInside.emit).toBe(false);
+    expect(justInside.state.armed).toBe(true);
+  });
+
+  it('first emit ignores the cooldown check when lastEmitAtMs is 0', () => {
+    const state = { lastScrollAtMs: 0, armed: true, lastEmitAtMs: 0 };
+    const out = decideScrollSettle({ ...base, state, nowMs: 3_000 });
+    expect(out.emit).toBe(true);
+  });
+
+  it('education-scale cooldown (120s) defers every settle across the 10-119s window', () => {
+    const state = { lastScrollAtMs: 0, armed: true, lastEmitAtMs: 10_000 };
+    for (const dt of [10_000, 30_000, 60_000, 119_000]) {
+      const out = decideScrollSettle({
+        ...base,
+        state,
+        cooldownMs: 120_000,
+        nowMs: 10_000 + dt,
+      });
+      expect(out.emit).toBe(false);
+      expect(out.state.armed).toBe(true);
+    }
+    const past = decideScrollSettle({
+      ...base,
+      state,
+      cooldownMs: 120_000,
+      nowMs: 10_000 + 120_000,
+    });
+    expect(past.emit).toBe(true);
+  });
+
+  it('a continuous burst (scroll every tick) never emits — re-arming keeps lastScrollAtMs fresh', () => {
+    let state = initialScrollSettleState();
+    for (let k = 1; k <= 12; k++) {
+      const now = k * NATIVE_TICK_INTERVAL_MS;
+      state = recordScrollEvent(state, now); // a scroll landed this tick
+      const out = decideScrollSettle({ ...base, state, nowMs: now });
+      expect(out.emit).toBe(false);
+      state = out.state;
+    }
+    expect(state.armed).toBe(true);
   });
 });

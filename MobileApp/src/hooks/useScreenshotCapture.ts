@@ -28,11 +28,17 @@ import { shouldCapFilteredSearchResults } from '../utils/riskySearchContext';
 import {
   computeAdaptiveIntervalMs,
   computeEffectiveAdaptiveInterval,
+  decideScrollSettle,
   decideTickAction,
+  initialScrollSettleState,
   NATIVE_TICK_INTERVAL_MS,
   OCR_LOCK_LIVENESS_MS,
   pushRiskScore,
+  recordScrollEvent,
   RISK_INTERVAL_LOW_MS,
+  SCROLL_SETTLE_COOLDOWN_MS,
+  SCROLL_SETTLE_MS,
+  type ScrollSettleState,
 } from '../utils/adaptiveCapture';
 import {
   APP_OWN_PACKAGE,
@@ -71,16 +77,18 @@ import {
   unregisterMissionCaptureHandlers,
 } from '../utils/missionCaptureSession';
 import {
+  CAPTURE_DEBOUNCE_MS,
   createCaptureCoordinator,
   CaptureReason,
   isForceCaptureReason,
   type CaptureCoordinator,
   type NativeRejectionReason,
 } from '../capture/captureCoordinator';
-import { createWindowEventFilter } from '../capture/windowEventFilter';
+import { createWindowEventFilter, isImePackage } from '../capture/windowEventFilter';
 import { useAccessibilityEvents } from './useAccessibilityEvents';
 import type {
   AccessibilityKeyboardChangedEvent,
+  AccessibilityScrollEvent,
   AccessibilityWindowChangedEvent,
 } from '../native/SafeGuardAccessibility';
 import type {
@@ -195,6 +203,8 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
   const dynamicIntervalMsRef = useRef(RISK_INTERVAL_LOW_MS);
   /** Wall-clock of the last native tick that passed the subsample gate. */
   const lastPeriodicPassAtRef = useRef(Number.NEGATIVE_INFINITY);
+  /** A3c-3 tick-driven scroll-settle state (armed by `onAccessibilityScroll`). */
+  const scrollSettleStateRef = useRef<ScrollSettleState>(initialScrollSettleState());
   const followUpTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const appPollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const visitedLauncherRef = useRef(false);
@@ -405,6 +415,11 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
         setLastForegroundApp(pkg);
       }
 
+      // An arm must not carry across an app switch: with defer-not-drop a stale
+      // arm can outlive the switch and emit a SCROLL_SETTLED mislabeled against
+      // the new app's screen. The app-switch capture already grabs it.
+      scrollSettleStateRef.current = initialScrollSettleState();
+
       const reason =
         wasLauncher && !nowLauncher
           ? CaptureReason.APP_SWITCH_LAUNCHER_RETURN
@@ -419,7 +434,7 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
   /**
    * Accessibility keyboard event — drives the coordinator's routine-capture
    * suppression while the soft keyboard is up. Firing a capture on keyboard-close is
-   * deliberately NOT done here (candidate for the scroll-settle task); no settle timer.
+   * deliberately NOT done here; no settle timer.
    */
   const handleA11yKeyboardChanged = useCallback(
     (event: AccessibilityKeyboardChangedEvent) => {
@@ -429,9 +444,36 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
     [],
   );
 
+  /**
+   * Accessibility scroll event (A3c-3) — arms the tick-driven scroll-settle. The
+   * decision (emit / defer / disarm) is made in the native tick handler by the
+   * pure `decideScrollSettle`; nothing here starts a timer (RN freezes JS timers
+   * while backgrounded). Drops events from our own window, an IME package, or
+   * while the keyboard is up (no fresh `getWindows()` — the cached flag), and
+   * while not monitoring / mission-paused (mirrors the window handler).
+   */
+  const handleA11yScroll = useCallback((event: AccessibilityScrollEvent) => {
+    if (!isMonitoringRef.current || isMissionCapturePaused()) {
+      return;
+    }
+    const pkg = event.packageName || '';
+    if (
+      pkg === APP_OWN_PACKAGE ||
+      isImePackage(pkg) ||
+      a11yKeyboardVisibleRef.current
+    ) {
+      return;
+    }
+    scrollSettleStateRef.current = recordScrollEvent(
+      scrollSettleStateRef.current,
+      event.timestamp,
+    );
+  }, []);
+
   const { connected: a11yConnected } = useAccessibilityEvents({
     onWindowChanged: handleA11yWindowChanged,
     onKeyboardChanged: handleA11yKeyboardChanged,
+    onScroll: handleA11yScroll,
   });
 
   useEffect(() => {
@@ -1227,6 +1269,7 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
       setAvgRiskScore(null);
       coordinatorRef.current!.reset();
       windowEventFilterRef.current.reset();
+      scrollSettleStateRef.current = initialScrollSettleState();
       // Seed liveness now so a quiet first minute is not treated as a stale a11y path.
       lastA11yWindowEventAtMs.current = Date.now();
       a11yKeyboardVisibleRef.current = false;
@@ -1265,6 +1308,7 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
     resetForegroundLookup();
     coordinatorRef.current!.reset();
     windowEventFilterRef.current.reset();
+    scrollSettleStateRef.current = initialScrollSettleState();
     // Force-clear the keyboard latch: if the service died with the keyboard open no
     // visible:false will arrive to clear it.
     coordinatorRef.current!.setKeyboardVisible(false);
@@ -1304,6 +1348,10 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
     }
     try {
       missionEndedAtRef.current = Date.now();
+      // Drop any arm taken before the mission pause — the native tick was
+      // stopped while paused, so an untouched arm would settle-fire on the
+      // first tick after resume, duplicating the MISSION_RESUME capture.
+      scrollSettleStateRef.current = initialScrollSettleState();
       await getScreenCaptureModule().resumeCapture();
       scLog('resumeCapture OK');
       void refreshForegroundCache();
@@ -1342,6 +1390,7 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
     coordinatorRef.current!.reset();
     coordinatorRef.current!.setKeyboardVisible(false);
     windowEventFilterRef.current.reset();
+    scrollSettleStateRef.current = initialScrollSettleState();
     a11yKeyboardVisibleRef.current = false;
     riskHistoryRef.current = [];
     setIsMonitoring(false);
@@ -1430,7 +1479,7 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
         });
         if (action === 'forceReleaseLock') {
           forceReleaseProcessingLock('tick-liveness');
-          // Next tick (~10s) re-issues a capture through the coordinator, now
+          // Next tick (~5s) re-issues a capture through the coordinator, now
           // that isProcessing() is false again.
           return;
         }
@@ -1439,7 +1488,35 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
           // even if the coordinator then debounces/suppresses it (something
           // captured nearby, or capture is intentionally paused).
           lastPeriodicPassAtRef.current = now;
+          // A periodic frame covers a *settled* scroll arm; leave an unsettled
+          // arm (mid-scroll) for its own tick — it re-arms on its next event.
+          if (
+            now - scrollSettleStateRef.current.lastScrollAtMs >=
+            SCROLL_SETTLE_MS
+          ) {
+            scrollSettleStateRef.current = {
+              ...scrollSettleStateRef.current,
+              armed: false,
+            };
+          }
           void tryCaptureNow(CaptureReason.PERIODIC_FALLBACK);
+          return;
+        }
+        // action === 'noop' — the tick is free; check the scroll-settle backstop.
+        // Same choke point as everything else, so keyboard-suppression,
+        // mission-pause, debounce and A3c-1 rejection handling all apply.
+        const periodicMs = dynamicIntervalMsRef.current;
+        const scroll = decideScrollSettle({
+          state: scrollSettleStateRef.current,
+          nowMs: now,
+          periodicIntervalMs: periodicMs,
+          lastPeriodicPassAtMs: lastPeriodicPassAtRef.current,
+          cooldownMs: Math.max(SCROLL_SETTLE_COOLDOWN_MS, periodicMs),
+          periodicGuardMs: CAPTURE_DEBOUNCE_MS,
+        });
+        scrollSettleStateRef.current = scroll.state;
+        if (scroll.emit) {
+          void tryCaptureNow(CaptureReason.SCROLL_SETTLED);
         }
       },
     );
