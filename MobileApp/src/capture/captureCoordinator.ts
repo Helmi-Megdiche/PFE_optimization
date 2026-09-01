@@ -10,6 +10,12 @@
  *     `forceNextCapture()`; `onNativeRejected('interval_floor')` clears that mirror
  *     so an attempt native dropped on its 5s floor can't leave the bypass armed for
  *     an unrelated later frame. A native rejection NEVER advances the debounce clock.
+ *   - the owed-force debt (A3d): a tier-0 reason DROPPED by the debounce (not just
+ *     native-rejected) is not allowed to vanish — the intent is remembered and the
+ *     next allowed request of ANY reason pays it off with one hash-gate bypass, so a
+ *     genuine app switch that lands inside another switch's debounce window still
+ *     gets one un-gated look at the new screen. See `requestCapture` and
+ *     `onNativeRejected`.
  *
  * Pure and injectable — no React, no react-native, no native modules — so it is
  * unit-testable with a fake clock.
@@ -77,7 +83,7 @@ export function isKeyboardSuppressibleReason(reason: CaptureReason): boolean {
 }
 
 export type CaptureDecision =
-  | {allowed: true; reason: CaptureReason}
+  | {allowed: true; reason: CaptureReason; force: boolean}
   | {
       allowed: false;
       skipReason: CaptureSkipReason;
@@ -139,6 +145,11 @@ export function createCaptureCoordinator(deps: CaptureCoordinatorDeps) {
   // (`onFrameAccepted`) or when the attempt is rejected on the native interval
   // floor (`onNativeRejected('interval_floor')`).
   let forceArmedReason: CaptureReason | null = null;
+  // A3d: a tier-0 reason was DEBOUNCED (never even reached native) or a bypass was
+  // armed but native rejected it (no frame produced either way) — one hash-gate
+  // bypass is still owed. No TTL: an unpaid debt means no capture has happened at
+  // all for that context change, which is exactly when the bypass is still wanted.
+  let forceCaptureOwed = false;
 
   function requestCapture(reason: CaptureReason): CaptureDecision {
     deps.log('capture.requested', {reason});
@@ -184,15 +195,28 @@ export function createCaptureCoordinator(deps: CaptureCoordinatorDeps) {
     const elapsed = deps.now() - lastAcceptedAtMs;
     if (elapsed < minGapFor(reason)) {
       const skipReason = CaptureSkipReason.DEBOUNCED;
-      deps.log('capture.skipped', {reason, skipReason, elapsedMs: elapsed});
+      if (isForceCaptureReason(reason)) {
+        // A genuine context change is being dropped, not just a routine re-scan.
+        // Don't let it vanish: the next allowed capture of ANY reason still pays
+        // this off with a hash-gate bypass, even though this exact request didn't.
+        forceCaptureOwed = true;
+      }
+      deps.log('capture.skipped', {
+        reason,
+        skipReason,
+        elapsedMs: elapsed,
+        forceOwed: forceCaptureOwed,
+      });
       return {allowed: false, skipReason};
     }
 
-    if (isForceCaptureReason(reason)) {
+    const force = isForceCaptureReason(reason) || forceCaptureOwed;
+    if (force) {
       forceArmedReason = reason;
+      forceCaptureOwed = false;
     }
-    deps.log('capture.allowed', {reason});
-    return {allowed: true, reason};
+    deps.log('capture.allowed', {reason, force});
+    return {allowed: true, reason, force};
   }
 
   /** Called when a captured frame is accepted for processing — advances the debounce clock. */
@@ -209,10 +233,19 @@ export function createCaptureCoordinator(deps: CaptureCoordinatorDeps) {
    * the force-arm mirror so the orphaned bypass doesn't survive to a later unrelated
    * frame (native self-clears its own flag in the same case). Delivered via a bridge
    * event, so it is unaffected by RN freezing JS timers while backgrounded.
+   *
+   * A3d: if a bypass was armed (`forceArmedReason` set) when native rejects on its
+   * own floor, no frame was produced — the context change that bypass existed for is
+   * still unseen, whether it got here via a genuine tier-0 reason or a paid-down
+   * debt. Re-owe it rather than dropping it a second time; the next allowed request
+   * tries again.
    */
   function onNativeRejected(reason: NativeRejectionReason): void {
     deps.log('capture.nativeRejected', {reason, forceArmedReason});
     if (reason === 'interval_floor') {
+      if (forceArmedReason !== null) {
+        forceCaptureOwed = true;
+      }
       forceArmedReason = null;
     }
   }
@@ -243,6 +276,7 @@ export function createCaptureCoordinator(deps: CaptureCoordinatorDeps) {
     pendingReason = null;
     keyboardVisible = false;
     forceArmedReason = null;
+    forceCaptureOwed = false;
   }
 
   return {

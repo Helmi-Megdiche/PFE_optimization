@@ -340,6 +340,7 @@ describe('captureCoordinator — SCROLL_SETTLED routing (A3c-3)', () => {
     expect(coordinator.requestCapture(CaptureReason.SCROLL_SETTLED)).toEqual({
       allowed: true,
       reason: CaptureReason.SCROLL_SETTLED,
+      force: false,
     });
   });
 
@@ -410,7 +411,7 @@ describe('captureCoordinator — native rejection', () => {
     );
   });
 
-  it('a rejected tier-0 attempt disarms the force flag so the next frame is not bypassed', () => {
+  it('a rejected tier-0 attempt disarms the mirror immediately, but re-owes the bypass (A3d)', () => {
     const {clock, coordinator} = makeHarness();
 
     expect(coordinator.requestCapture(CaptureReason.APP_SWITCH).allowed).toBe(
@@ -419,15 +420,22 @@ describe('captureCoordinator — native rejection', () => {
     expect(coordinator.isForceArmed()).toBe(true);
 
     coordinator.onNativeRejected('interval_floor');
+    // The mirror clears immediately — no frame was produced, so native no longer
+    // has a live bypass armed either.
     expect(coordinator.isForceArmed()).toBe(false);
 
-    // A later unrelated (non-tier-0) allowed request stays un-armed — the next
-    // native frame goes through the normal hash gate.
+    // But no frame was ever captured for the app switch, so the bypass is still
+    // owed: the very next allowed request — even a routine one — pays it off and
+    // re-arms the mirror. (Reverses the pre-A3d behavior, where this rejection
+    // silently discarded the switch a second time.)
     clock.t = 10_000;
-    expect(
-      coordinator.requestCapture(CaptureReason.PERIODIC_FALLBACK).allowed,
-    ).toBe(true);
-    expect(coordinator.isForceArmed()).toBe(false);
+    const next = coordinator.requestCapture(CaptureReason.PERIODIC_FALLBACK);
+    expect(next).toEqual({
+      allowed: true,
+      reason: CaptureReason.PERIODIC_FALLBACK,
+      force: true,
+    });
+    expect(coordinator.isForceArmed()).toBe(true);
   });
 
   it('a successful tier-0 frame keeps existing bypass behavior (armed, then consumed on frame-accepted)', () => {
@@ -484,6 +492,145 @@ describe('captureCoordinator — native rejection', () => {
 
     coordinator.reset();
     expect(coordinator.isForceArmed()).toBe(false);
+  });
+});
+
+describe('captureCoordinator — owed-force debt (A3d, never drop a tier-0 intent)', () => {
+  it('a debounced tier-0 reason is not lost: the next allowed request pays it off, even a non-force one', () => {
+    const {clock, coordinator} = makeHarness();
+
+    // First genuine switch: allowed, accepted.
+    expect(coordinator.requestCapture(CaptureReason.APP_SWITCH).allowed).toBe(
+      true,
+    );
+    coordinator.onFrameAccepted(clock.t); // anchor at t=0
+
+    // A second genuine switch lands inside the 5s debounce window (device-observed:
+    // elapsedMs: 323 in the reference log) and is dropped.
+    clock.t = 323;
+    const dropped = coordinator.requestCapture(
+      CaptureReason.APP_SWITCH_LAUNCHER_RETURN,
+    );
+    expect(dropped).toEqual({
+      allowed: false,
+      skipReason: CaptureSkipReason.DEBOUNCED,
+    });
+
+    // The debounce clears; whatever fires next is a routine periodic tick, not
+    // another switch — it still inherits the bypass the dropped switch owed.
+    clock.t = 5_000;
+    const next = coordinator.requestCapture(CaptureReason.PERIODIC_FALLBACK);
+    expect(next).toEqual({
+      allowed: true,
+      reason: CaptureReason.PERIODIC_FALLBACK,
+      force: true,
+    });
+  });
+
+  it('the owed bypass is consumed exactly once, not on every later request', () => {
+    const {clock, coordinator} = makeHarness();
+
+    expect(coordinator.requestCapture(CaptureReason.APP_SWITCH).allowed).toBe(
+      true,
+    );
+    coordinator.onFrameAccepted(clock.t);
+
+    clock.t = 1_000;
+    coordinator.requestCapture(CaptureReason.APP_SWITCH); // debounced — owes
+
+    clock.t = 5_000;
+    const first = coordinator.requestCapture(CaptureReason.PERIODIC_FALLBACK);
+    expect(first).toEqual({
+      allowed: true,
+      reason: CaptureReason.PERIODIC_FALLBACK,
+      force: true,
+    });
+    coordinator.onFrameAccepted(clock.t);
+
+    clock.t = 10_000;
+    const second = coordinator.requestCapture(CaptureReason.PERIODIC_FALLBACK);
+    expect(second).toEqual({
+      allowed: true,
+      reason: CaptureReason.PERIODIC_FALLBACK,
+      force: false,
+    });
+  });
+
+  it('a debounced non-force reason owes nothing', () => {
+    const {clock, coordinator} = makeHarness();
+
+    expect(
+      coordinator.requestCapture(CaptureReason.PERIODIC_FALLBACK).allowed,
+    ).toBe(true);
+    coordinator.onFrameAccepted(clock.t);
+
+    clock.t = 1_000;
+    coordinator.requestCapture(CaptureReason.SCROLL_SETTLED); // debounced, not tier-0
+
+    clock.t = 5_000;
+    const next = coordinator.requestCapture(CaptureReason.PERIODIC_FALLBACK);
+    expect(next).toEqual({
+      allowed: true,
+      reason: CaptureReason.PERIODIC_FALLBACK,
+      force: false,
+    });
+  });
+
+  it('reset() clears the owed-force debt', () => {
+    const {clock, coordinator} = makeHarness();
+
+    expect(coordinator.requestCapture(CaptureReason.APP_SWITCH).allowed).toBe(
+      true,
+    );
+    coordinator.onFrameAccepted(clock.t);
+
+    clock.t = 1_000;
+    coordinator.requestCapture(CaptureReason.APP_SWITCH); // debounced — owes
+
+    coordinator.reset();
+
+    const next = coordinator.requestCapture(CaptureReason.PERIODIC_FALLBACK);
+    expect(next).toEqual({
+      allowed: true,
+      reason: CaptureReason.PERIODIC_FALLBACK,
+      force: false,
+    });
+  });
+
+  it('replays the device sequence (smokeD.log 12:11:22-12:12:23): the debounced Instagram switch is honoured by the next capture', () => {
+    const {clock, coordinator} = makeHarness();
+
+    // 12:11:22.900 — switch into the Google search widget: allowed.
+    expect(coordinator.requestCapture(CaptureReason.APP_SWITCH).allowed).toBe(
+      true,
+    );
+    coordinator.onFrameAccepted(0);
+
+    // 12:11:23.577 — appstate_background arrives while the frame above is still
+    // processing (isProcessing) — coalesced, not debounced, no debt.
+    // Modeled by simply not calling isProcessing()=true here; BUSY_DEFERRED /
+    // SUPERSEDED are covered by the existing "captureCoordinator" describe block
+    // and don't interact with the debounce path this test exercises.
+
+    // 12:11:24.494 — elapsedMs: 323 — the real switch into Instagram, dropped.
+    clock.t = 323;
+    const dropped = coordinator.requestCapture(CaptureReason.APP_SWITCH);
+    expect(dropped).toEqual({
+      allowed: false,
+      skipReason: CaptureSkipReason.DEBOUNCED,
+    });
+
+    // 12:11:30.358 — the scroll-settled capture that, pre-A3d, hit
+    // frame.skipped.unchanged because no bypass was ever armed for Instagram.
+    clock.t = 6_358; // ~5.9s after the switch, past the 5s debounce
+    const scrollSettled = coordinator.requestCapture(
+      CaptureReason.SCROLL_SETTLED,
+    );
+    expect(scrollSettled).toEqual({
+      allowed: true,
+      reason: CaptureReason.SCROLL_SETTLED,
+      force: true, // <- the fix: this frame now bypasses the hash gate
+    });
   });
 });
 

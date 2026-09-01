@@ -80,7 +80,6 @@ import {
   CAPTURE_DEBOUNCE_MS,
   createCaptureCoordinator,
   CaptureReason,
-  isForceCaptureReason,
   type CaptureCoordinator,
   type NativeRejectionReason,
 } from '../capture/captureCoordinator';
@@ -273,7 +272,10 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
       if (!decision.allowed) {
         return;
       }
-      if (isForceCaptureReason(decision.reason)) {
+      // decision.force covers both a genuine tier-0 reason and a paid-down A3d
+      // owed-force debt (a tier-0 switch the debounce dropped earlier) — either
+      // way the coordinator has decided this frame must bypass the hash gate.
+      if (decision.force) {
         getScreenCaptureModule()
           .forceNextCapture()
           .catch(err => scWarn('forceNextCapture failed', {reason, err}));
