@@ -4,6 +4,9 @@ import getScreenCaptureModule, {
   screenCaptureEmitter,
   SCREEN_CAPTURE_EVENTS,
   type ScreenCapturedEvent,
+  type ScreenCaptureRejectedEvent,
+  type ScreenCaptureTickEvent,
+  type MonitoringRevokedEvent,
 } from '../native/ScreenCapture';
 import { keywordFilter } from '../utils/keywordFilter';
 import { classifyImage } from '../services/imageClassifier';
@@ -25,6 +28,9 @@ import { shouldCapFilteredSearchResults } from '../utils/riskySearchContext';
 import {
   computeAdaptiveIntervalMs,
   computeEffectiveAdaptiveInterval,
+  decideTickAction,
+  NATIVE_TICK_INTERVAL_MS,
+  OCR_LOCK_LIVENESS_MS,
   pushRiskScore,
   RISK_INTERVAL_LOW_MS,
 } from '../utils/adaptiveCapture';
@@ -69,6 +75,7 @@ import {
   CaptureReason,
   isForceCaptureReason,
   type CaptureCoordinator,
+  type NativeRejectionReason,
 } from '../capture/captureCoordinator';
 import { createWindowEventFilter } from '../capture/windowEventFilter';
 import { useAccessibilityEvents } from './useAccessibilityEvents';
@@ -184,11 +191,12 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
   const foregroundAtPauseRef = useRef<string | null>(null);
 
   const riskHistoryRef = useRef<number[]>([]);
+  /** Current effective adaptive interval (0 = category disables periodic capture). */
   const dynamicIntervalMsRef = useRef(RISK_INTERVAL_LOW_MS);
-  const periodicTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** Wall-clock of the last native tick that passed the subsample gate. */
+  const lastPeriodicPassAtRef = useRef(Number.NEGATIVE_INFINITY);
   const followUpTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const appPollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const lastResetTimeRef = useRef<number>(0);
   const visitedLauncherRef = useRef(false);
 
   /** Accessibility window-event driven app-switch path (falls back to the 1s poll). */
@@ -234,20 +242,12 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
     };
   }, []);
 
-  const clearPeriodicTimer = useCallback(() => {
-    if (periodicTimerRef.current) {
-      clearTimeout(periodicTimerRef.current);
-      periodicTimerRef.current = null;
-    }
-  }, []);
-
   const clearCaptureTimers = useCallback(() => {
-    clearPeriodicTimer();
     if (followUpTimerRef.current) {
       clearTimeout(followUpTimerRef.current);
       followUpTimerRef.current = null;
     }
-  }, [clearPeriodicTimer]);
+  }, []);
 
   const clearAdaptiveTimers = useCallback(() => {
     clearCaptureTimers();
@@ -279,43 +279,6 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
     },
     [],
   );
-
-  const resetPeriodicTimer = useCallback(() => {
-    const now = Date.now();
-    if (now - lastResetTimeRef.current < 500) {
-      scLog('Periodic timer restart debounced');
-      return;
-    }
-    lastResetTimeRef.current = now;
-
-    if (periodicTimerRef.current) {
-      clearTimeout(periodicTimerRef.current);
-      periodicTimerRef.current = null;
-    }
-    if (!isMonitoringRef.current) {
-      return;
-    }
-
-    const scheduleTick = () => {
-      const delay = dynamicIntervalMsRef.current;
-      periodicTimerRef.current = setTimeout(() => {
-        periodicTimerRef.current = null;
-        if (!isMonitoringRef.current) {
-          return;
-        }
-        void tryCaptureNow(CaptureReason.PERIODIC_ADAPTIVE).finally(() => {
-          if (isMonitoringRef.current) {
-            scheduleTick();
-          }
-        });
-      }, delay);
-    };
-
-    scLog('Periodic adaptive timer (re)started', {
-      intervalMs: dynamicIntervalMsRef.current,
-    });
-    scheduleTick();
-  }, [tryCaptureNow]);
 
   const applyEffectiveInterval = useCallback(
     (reason: string) => {
@@ -356,14 +319,10 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
         riskOnlyIntervalMs: riskOnlyInterval,
         effectiveIntervalMs: effectiveInterval,
       });
-
-      if (effectiveInterval === 0) {
-        clearPeriodicTimer();
-      } else {
-        resetPeriodicTimer();
-      }
+      // No timer to restart — the native periodic tick handler reads
+      // dynamicIntervalMsRef fresh on every tick (0 = periodic disabled).
     },
-    [clearPeriodicTimer, resetPeriodicTimer],
+    [],
   );
 
   const updateRiskAndInterval = useCallback(
@@ -488,6 +447,27 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
     }
   }, [a11yConnected]);
 
+  /**
+   * Force-release a wedged processing lock (any never-settling `await` in
+   * `processCapturedFrame` — vision pass or the foreground-lookup IPC — can latch
+   * it). Touches only hook-scoped refs, so it is safe to call from any closure —
+   * the heartbeat (foregrounded) and the native periodic tick (the only recovery
+   * path that keeps running while backgrounded).
+   * Bumping the generation makes a stale in-flight run abort at its next
+   * `isActive()` checkpoint and turns its `finally` lock-release into a no-op,
+   * exactly as the `processingWatchdog` setTimeout already does today.
+   */
+  const forceReleaseProcessingLock = useCallback((cause: string) => {
+    const elapsed =
+      processingStartTimeRef.current > 0
+        ? Date.now() - processingStartTimeRef.current
+        : 0;
+    processingGenerationRef.current += 1;
+    isProcessingRef.current = false;
+    processingStartTimeRef.current = 0;
+    scWarn('Processing lock force-released after hung frame', { cause, elapsed });
+  }, []);
+
   const processCapturedFrame = useCallback(
     async (event: ScreenCapturedEvent): Promise<CaptureCycleResult> => {
       if (isMissionCapturePaused()) {
@@ -541,10 +521,7 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
         }
         const elapsed = Date.now() - processingStartTimeRef.current;
         if (elapsed > FRAME_PROCESSING_WATCHDOG_MS) {
-          processingGenerationRef.current += 1;
-          isProcessingRef.current = false;
-          processingStartTimeRef.current = 0;
-          scWarn('Processing heartbeat — forced release after hung frame', { elapsed });
+          forceReleaseProcessingLock('heartbeat');
           if (processingHeartbeat !== undefined) {
             clearInterval(processingHeartbeat);
             processingHeartbeat = undefined;
@@ -1004,7 +981,12 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
         }
       }
     },
-    [maxTextLength, triggerAppSwitchCapture, updateRiskAndInterval],
+    [
+      maxTextLength,
+      triggerAppSwitchCapture,
+      updateRiskAndInterval,
+      forceReleaseProcessingLock,
+    ],
   );
 
   processCapturedFrameRef.current = processCapturedFrame;
@@ -1209,8 +1191,13 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
     }
 
     isStartingRef.current = true;
-    const nativePeriodicMs = Math.max(RISK_INTERVAL_LOW_MS, intervalMs);
-    scLog('startMonitoring() start', { nativePeriodicMs, adaptive: true });
+    // The native loop is a fixed-cadence tick source; JS subsamples it to the
+    // effective adaptive interval. The `intervalMs` option only seeds that target.
+    scLog('startMonitoring() start', {
+      nativeTickMs: NATIVE_TICK_INTERVAL_MS,
+      seedIntervalMs: intervalMs,
+      adaptive: true,
+    });
 
     const usageOk = await refreshUsageAccess();
     if (!usageOk) {
@@ -1230,10 +1217,11 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
         return false;
       }
 
-      await native.startCapture(nativePeriodicMs);
+      await native.startCapture(NATIVE_TICK_INTERVAL_MS);
 
       riskHistoryRef.current = [];
       dynamicIntervalMsRef.current = RISK_INTERVAL_LOW_MS;
+      lastPeriodicPassAtRef.current = Number.NEGATIVE_INFINITY;
       setDynamicIntervalMs(RISK_INTERVAL_LOW_MS);
       setAppCategory(null);
       setAvgRiskScore(null);
@@ -1338,6 +1326,33 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
     }
   }, [isMonitoring, pauseCapture]);
 
+  /**
+   * Native told us monitoring stopped involuntarily (system/cast-UI revoked the
+   * MediaProjection while the loop was live). Native has already torn its session
+   * down — here we just reflect reality and prompt a re-enable. The `isMonitoringRef`
+   * guard is a second layer behind the native `isRunning.getAndSet(false)` gate: a
+   * voluntary stop can never reach this, but if one raced through, we no-op.
+   */
+  const handleMonitoringRevoked = useCallback(() => {
+    if (!isMonitoringRef.current) {
+      return;
+    }
+    scWarn('MediaProjection revoked by system — monitoring stopped');
+    clearAdaptiveTimers();
+    coordinatorRef.current!.reset();
+    coordinatorRef.current!.setKeyboardVisible(false);
+    windowEventFilterRef.current.reset();
+    a11yKeyboardVisibleRef.current = false;
+    riskHistoryRef.current = [];
+    setIsMonitoring(false);
+    setIsPaused(false);
+    setPermissionGranted(false);
+    setLastError(
+      'Screen monitoring stopped: the system revoked screen-capture permission. ' +
+        'Turn monitoring back on to resume.',
+    );
+  }, [clearAdaptiveTimers]);
+
   useEffect(() => {
     if (Platform.OS !== 'android') {
       return undefined;
@@ -1370,11 +1385,87 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
       },
     );
 
+    // Native dropped an attempt before it produced a frame (its own 5s interval
+    // floor, or a frame already in progress). One-way — the coordinator must not
+    // advance its debounce clock, and an interval-floor reject disarms the
+    // orphaned force-capture flag so it can't bypass the hash gate on a later frame.
+    const rejectedSub = screenCaptureEmitter.addListener(
+      SCREEN_CAPTURE_EVENTS.rejected,
+      (event: ScreenCaptureRejectedEvent) => {
+        coordinatorRef.current?.onNativeRejected(
+          event.reason as NativeRejectionReason,
+        );
+        scLog('[Native] capture rejected', {
+          reason: event.reason,
+          elapsedMs: event.elapsedMs,
+        });
+      },
+    );
+
+    // Single periodic source: the native loop ticks at a fixed cadence; JS
+    // subsamples it down to the effective adaptive interval (0 = disabled) and
+    // routes survivors through the same coordinator pipeline as every other
+    // capture reason (keyboard suppression, mission-pause, debounce, rejection).
+    //
+    // A3c-2c: this native tick is the one clock that survives backgrounding, so
+    // it also carries the liveness backstop for the JS OCR lock. `decideTickAction`
+    // checks the wedged-lock condition BEFORE the subsample gate — a lock stuck
+    // during a game (target 0) or a long education interval (120s) must still be
+    // cleared, and the in-frame setTimeout/setInterval watchdogs are RN-frozen
+    // while backgrounded so they can't do it.
+    const tickSub = screenCaptureEmitter.addListener(
+      SCREEN_CAPTURE_EVENTS.tick,
+      (_event: ScreenCaptureTickEvent) => {
+        if (!isMonitoringRef.current) {
+          return;
+        }
+        const now = Date.now();
+        const action = decideTickAction({
+          isProcessing: isProcessingRef.current,
+          processingStartAtMs: processingStartTimeRef.current,
+          nowMs: now,
+          livenessThresholdMs: OCR_LOCK_LIVENESS_MS,
+          lastPeriodicPassAtMs: lastPeriodicPassAtRef.current,
+          dynamicIntervalMs: dynamicIntervalMsRef.current,
+        });
+        if (action === 'forceReleaseLock') {
+          forceReleaseProcessingLock('tick-liveness');
+          // Next tick (~10s) re-issues a capture through the coordinator, now
+          // that isProcessing() is false again.
+          return;
+        }
+        if (action === 'emitCapture') {
+          // Optimistic: a tick that passes the subsample "spends" this period
+          // even if the coordinator then debounces/suppresses it (something
+          // captured nearby, or capture is intentionally paused).
+          lastPeriodicPassAtRef.current = now;
+          void tryCaptureNow(CaptureReason.PERIODIC_FALLBACK);
+        }
+      },
+    );
+
+    // Involuntary projection loss — native already tore down; flip our state + prompt.
+    const revokedSub = screenCaptureEmitter.addListener(
+      SCREEN_CAPTURE_EVENTS.monitoringRevoked,
+      (_event: MonitoringRevokedEvent) => {
+        handleMonitoringRevoked();
+      },
+    );
+
     return () => {
       captureSub.remove();
       errorSub.remove();
+      rejectedSub.remove();
+      tickSub.remove();
+      revokedSub.remove();
     };
-  }, [onCycleComplete, processCapturedFrame]);
+  }, [
+    onCycleComplete,
+    processCapturedFrame,
+    tryCaptureNow,
+    handleMonitoringRevoked,
+    forceReleaseProcessingLock,
+  ]);
 
   useEffect(() => {
     if (!isMonitoring || isPaused || Platform.OS !== 'android') {

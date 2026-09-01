@@ -72,16 +72,16 @@ describe('captureCoordinator', () => {
     flags.processing = true;
 
     const decision = coordinator.requestCapture(
-      CaptureReason.PERIODIC_ADAPTIVE,
+      CaptureReason.PERIODIC_FALLBACK,
     );
     expect(decision).toEqual({
       allowed: false,
       skipReason: CaptureSkipReason.BUSY_DEFERRED,
-      pendingReason: CaptureReason.PERIODIC_ADAPTIVE,
+      pendingReason: CaptureReason.PERIODIC_FALLBACK,
     });
 
     expect(coordinator.takePendingReason()).toBe(
-      CaptureReason.PERIODIC_ADAPTIVE,
+      CaptureReason.PERIODIC_FALLBACK,
     );
     expect(coordinator.takePendingReason()).toBeNull();
   });
@@ -92,7 +92,7 @@ describe('captureCoordinator', () => {
 
     coordinator.requestCapture(CaptureReason.APP_SWITCH);
     const superseded = coordinator.requestCapture(
-      CaptureReason.PERIODIC_ADAPTIVE,
+      CaptureReason.PERIODIC_FALLBACK,
     );
     expect(superseded).toEqual({
       allowed: false,
@@ -106,7 +106,7 @@ describe('captureCoordinator', () => {
     const {flags, coordinator} = makeHarness();
     flags.processing = true;
 
-    coordinator.requestCapture(CaptureReason.PERIODIC_ADAPTIVE);
+    coordinator.requestCapture(CaptureReason.PERIODIC_FALLBACK);
     const overwrite = coordinator.requestCapture(CaptureReason.APP_SWITCH);
     expect(overwrite).toEqual({
       allowed: false,
@@ -162,7 +162,6 @@ describe('captureCoordinator', () => {
 
 describe('captureCoordinator — keyboard suppression', () => {
   const SUPPRESSIBLE = [
-    CaptureReason.PERIODIC_ADAPTIVE,
     CaptureReason.PERIODIC_FALLBACK,
     CaptureReason.CONTENT_CHANGE,
     CaptureReason.SCROLL_SETTLED,
@@ -201,12 +200,12 @@ describe('captureCoordinator — keyboard suppression', () => {
     const {coordinator} = makeHarness();
     coordinator.setKeyboardVisible(true);
     expect(
-      coordinator.requestCapture(CaptureReason.PERIODIC_ADAPTIVE).allowed,
+      coordinator.requestCapture(CaptureReason.PERIODIC_FALLBACK).allowed,
     ).toBe(false);
 
     coordinator.reset();
     expect(
-      coordinator.requestCapture(CaptureReason.PERIODIC_ADAPTIVE).allowed,
+      coordinator.requestCapture(CaptureReason.PERIODIC_FALLBACK).allowed,
     ).toBe(true);
   });
 
@@ -214,12 +213,12 @@ describe('captureCoordinator — keyboard suppression', () => {
     const {coordinator} = makeHarness();
     coordinator.setKeyboardVisible(true);
     expect(
-      coordinator.requestCapture(CaptureReason.PERIODIC_ADAPTIVE).allowed,
+      coordinator.requestCapture(CaptureReason.PERIODIC_FALLBACK).allowed,
     ).toBe(false);
 
     coordinator.setKeyboardVisible(false);
     expect(
-      coordinator.requestCapture(CaptureReason.PERIODIC_ADAPTIVE).allowed,
+      coordinator.requestCapture(CaptureReason.PERIODIC_FALLBACK).allowed,
     ).toBe(true);
   });
 
@@ -229,7 +228,7 @@ describe('captureCoordinator — keyboard suppression', () => {
     flags.processing = true;
     coordinator.setKeyboardVisible(true);
 
-    const decision = coordinator.requestCapture(CaptureReason.PERIODIC_ADAPTIVE);
+    const decision = coordinator.requestCapture(CaptureReason.PERIODIC_FALLBACK);
     expect(decision).toEqual({
       allowed: false,
       skipReason: CaptureSkipReason.MISSION_PAUSED,
@@ -246,7 +245,7 @@ describe('captureCoordinator — keyboard suppression', () => {
     flags.processing = true;
     coordinator.setKeyboardVisible(true);
 
-    const decision = coordinator.requestCapture(CaptureReason.PERIODIC_ADAPTIVE);
+    const decision = coordinator.requestCapture(CaptureReason.PERIODIC_FALLBACK);
     expect(decision).toEqual({
       allowed: false,
       skipReason: CaptureSkipReason.KEYBOARD_SUPPRESSED,
@@ -262,7 +261,6 @@ describe('captureCoordinator — keyboard suppression', () => {
 
 describe('isKeyboardSuppressibleReason', () => {
   const SUPPRESSIBLE: CaptureReason[] = [
-    CaptureReason.PERIODIC_ADAPTIVE,
     CaptureReason.PERIODIC_FALLBACK,
     CaptureReason.CONTENT_CHANGE,
     CaptureReason.SCROLL_SETTLED,
@@ -286,13 +284,13 @@ describe('isKeyboardSuppressibleReason', () => {
     expect(isKeyboardSuppressibleReason(reason)).toBe(false);
   });
 
-  it('covers every CaptureReason member exactly once (4 true, 8 false)', () => {
+  it('covers every CaptureReason member exactly once (3 true, 8 false)', () => {
     const all = Object.values(CaptureReason);
-    expect(all).toHaveLength(12);
-    expect(SUPPRESSIBLE).toHaveLength(4);
+    expect(all).toHaveLength(11);
+    expect(SUPPRESSIBLE).toHaveLength(3);
     expect(NOT_SUPPRESSIBLE).toHaveLength(8);
-    expect(all.filter(isKeyboardSuppressibleReason)).toHaveLength(4);
-    expect(new Set([...SUPPRESSIBLE, ...NOT_SUPPRESSIBLE]).size).toBe(12);
+    expect(all.filter(isKeyboardSuppressibleReason)).toHaveLength(3);
+    expect(new Set([...SUPPRESSIBLE, ...NOT_SUPPRESSIBLE]).size).toBe(11);
   });
 });
 
@@ -307,7 +305,6 @@ describe('isForceCaptureReason', () => {
     CaptureReason.APP_SWITCH_FOLLOW_UP,
     CaptureReason.APPSTATE_BACKGROUND,
     CaptureReason.MISSION_RESUME,
-    CaptureReason.PERIODIC_ADAPTIVE,
     CaptureReason.PERIODIC_FALLBACK,
     CaptureReason.RISK_FOLLOW_UP,
     CaptureReason.CONTENT_CHANGE,
@@ -325,12 +322,170 @@ describe('isForceCaptureReason', () => {
     expect(isForceCaptureReason(reason)).toBe(false);
   });
 
-  it('covers every CaptureReason member exactly once (4 true, 8 false)', () => {
+  it('covers every CaptureReason member exactly once (4 true, 7 false)', () => {
     const all = Object.values(CaptureReason);
-    expect(all).toHaveLength(12);
+    expect(all).toHaveLength(11);
     expect(FORCE_REASONS).toHaveLength(4);
-    expect(NON_FORCE_REASONS).toHaveLength(8);
+    expect(NON_FORCE_REASONS).toHaveLength(7);
     expect(all.filter(isForceCaptureReason)).toHaveLength(4);
-    expect(new Set([...FORCE_REASONS, ...NON_FORCE_REASONS]).size).toBe(12);
+    expect(new Set([...FORCE_REASONS, ...NON_FORCE_REASONS]).size).toBe(11);
+  });
+});
+
+describe('captureCoordinator — native rejection', () => {
+  it('native interval-floor rejection does not advance the debounce clock', () => {
+    const {clock, coordinator} = makeHarness();
+
+    expect(coordinator.requestCapture(CaptureReason.APP_SWITCH).allowed).toBe(
+      true,
+    );
+    coordinator.onFrameAccepted(1_000); // debounce clock anchored at t=1000
+
+    clock.t = 3_000;
+    coordinator.onNativeRejected('interval_floor');
+
+    // 4500ms since the anchor — still inside the 5s window. If the rejection had
+    // advanced the clock to 3000 this would be allowed; if it had rewound it to
+    // -Infinity it would also be allowed. It must stay anchored at 1000.
+    clock.t = 5_500;
+    expect(coordinator.requestCapture(CaptureReason.APP_SWITCH)).toEqual({
+      allowed: false,
+      skipReason: CaptureSkipReason.DEBOUNCED,
+    });
+
+    // 5001ms since the anchor — now past the window.
+    clock.t = 6_001;
+    expect(coordinator.requestCapture(CaptureReason.APP_SWITCH).allowed).toBe(
+      true,
+    );
+  });
+
+  it('a rejected tier-0 attempt disarms the force flag so the next frame is not bypassed', () => {
+    const {clock, coordinator} = makeHarness();
+
+    expect(coordinator.requestCapture(CaptureReason.APP_SWITCH).allowed).toBe(
+      true,
+    );
+    expect(coordinator.isForceArmed()).toBe(true);
+
+    coordinator.onNativeRejected('interval_floor');
+    expect(coordinator.isForceArmed()).toBe(false);
+
+    // A later unrelated (non-tier-0) allowed request stays un-armed — the next
+    // native frame goes through the normal hash gate.
+    clock.t = 10_000;
+    expect(
+      coordinator.requestCapture(CaptureReason.PERIODIC_FALLBACK).allowed,
+    ).toBe(true);
+    expect(coordinator.isForceArmed()).toBe(false);
+  });
+
+  it('a successful tier-0 frame keeps existing bypass behavior (armed, then consumed on frame-accepted)', () => {
+    const {clock, coordinator} = makeHarness();
+
+    expect(
+      coordinator.requestCapture(CaptureReason.APP_SWITCH_DEFERRED).allowed,
+    ).toBe(true);
+    expect(coordinator.isForceArmed()).toBe(true); // hook arms native forceNextCapture()
+
+    coordinator.onFrameAccepted(clock.t); // frame succeeded — no onNativeRejected
+    expect(coordinator.isForceArmed()).toBe(false); // consumed, not left dangling
+  });
+
+  it('a non-tier-0 allowed request never arms the force flag', () => {
+    const {coordinator} = makeHarness();
+    expect(
+      coordinator.requestCapture(CaptureReason.PERIODIC_FALLBACK).allowed,
+    ).toBe(true);
+    expect(coordinator.isForceArmed()).toBe(false);
+  });
+
+  it("a 'busy' rejection leaves the force flag armed (the in-flight frame consumes it)", () => {
+    const {coordinator} = makeHarness();
+
+    expect(coordinator.requestCapture(CaptureReason.APP_SWITCH).allowed).toBe(
+      true,
+    );
+    expect(coordinator.isForceArmed()).toBe(true);
+
+    coordinator.onNativeRejected('busy');
+    expect(coordinator.isForceArmed()).toBe(true);
+  });
+
+  it("a 'busy' rejection never touches the debounce clock", () => {
+    const {clock, coordinator} = makeHarness();
+
+    coordinator.onFrameAccepted(1_000); // anchor at t=1000
+    clock.t = 2_000;
+    coordinator.onNativeRejected('busy');
+
+    clock.t = 5_500; // 4500ms since anchor — still inside the window
+    expect(coordinator.requestCapture(CaptureReason.APP_SWITCH).allowed).toBe(
+      false,
+    );
+  });
+
+  it('reset() clears the force-arm mirror', () => {
+    const {coordinator} = makeHarness();
+    expect(coordinator.requestCapture(CaptureReason.APP_SWITCH).allowed).toBe(
+      true,
+    );
+    expect(coordinator.isForceArmed()).toBe(true);
+
+    coordinator.reset();
+    expect(coordinator.isForceArmed()).toBe(false);
+  });
+});
+
+describe('captureCoordinator — PERIODIC_FALLBACK routing (native tick)', () => {
+  it('is allowed on a clean coordinator', () => {
+    const {coordinator} = makeHarness();
+    expect(
+      coordinator.requestCapture(CaptureReason.PERIODIC_FALLBACK).allowed,
+    ).toBe(true);
+  });
+
+  it('is keyboard-suppressed exactly like other suppressible reasons', () => {
+    const {coordinator} = makeHarness();
+    coordinator.setKeyboardVisible(true);
+    expect(coordinator.requestCapture(CaptureReason.PERIODIC_FALLBACK)).toEqual({
+      allowed: false,
+      skipReason: CaptureSkipReason.KEYBOARD_SUPPRESSED,
+    });
+  });
+
+  it('is blocked while a mission is paused', () => {
+    const {flags, coordinator} = makeHarness();
+    flags.paused = true;
+    expect(coordinator.requestCapture(CaptureReason.PERIODIC_FALLBACK)).toEqual({
+      allowed: false,
+      skipReason: CaptureSkipReason.MISSION_PAUSED,
+    });
+  });
+
+  it('is debounced within 5s of an accepted frame', () => {
+    const {clock, coordinator} = makeHarness();
+    coordinator.onFrameAccepted(0);
+    clock.t = 4_999;
+    expect(coordinator.requestCapture(CaptureReason.PERIODIC_FALLBACK)).toEqual({
+      allowed: false,
+      skipReason: CaptureSkipReason.DEBOUNCED,
+    });
+    clock.t = 5_000;
+    expect(
+      coordinator.requestCapture(CaptureReason.PERIODIC_FALLBACK).allowed,
+    ).toBe(true);
+  });
+
+  it('is coalesced (BUSY_DEFERRED) while OCR is busy and never arms the force flag', () => {
+    const {flags, coordinator} = makeHarness();
+    flags.processing = true;
+    expect(coordinator.requestCapture(CaptureReason.PERIODIC_FALLBACK)).toEqual({
+      allowed: false,
+      skipReason: CaptureSkipReason.BUSY_DEFERRED,
+      pendingReason: CaptureReason.PERIODIC_FALLBACK,
+    });
+    expect(coordinator.takePendingReason()).toBe(CaptureReason.PERIODIC_FALLBACK);
+    expect(coordinator.isForceArmed()).toBe(false);
   });
 });

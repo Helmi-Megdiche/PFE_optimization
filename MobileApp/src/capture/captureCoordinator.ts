@@ -5,7 +5,11 @@
  * before invoking the native `captureNow`. The coordinator owns:
  *   - request debounce (per-reason minimum gap),
  *   - mission-pause gating for *requests* (inbound-frame gating stays in the hook),
- *   - "OCR busy" deferral with priority-based coalescing of the pending reason.
+ *   - "OCR busy" deferral with priority-based coalescing of the pending reason,
+ *   - the force-arm mirror: when a tier-0 reason is allowed the hook calls native
+ *     `forceNextCapture()`; `onNativeRejected('interval_floor')` clears that mirror
+ *     so an attempt native dropped on its 5s floor can't leave the bypass armed for
+ *     an unrelated later frame. A native rejection NEVER advances the debounce clock.
  *
  * Pure and injectable — no React, no react-native, no native modules — so it is
  * unit-testable with a fake clock.
@@ -23,7 +27,6 @@ export enum CaptureReason {
   APP_SWITCH_DEFERRED = 'app_switch_deferred',
   APPSTATE_BACKGROUND = 'appstate_background',
   MISSION_RESUME = 'mission_resume',
-  PERIODIC_ADAPTIVE = 'periodic_adaptive',
   PERIODIC_FALLBACK = 'periodic_fallback',
   RISK_FOLLOW_UP = 'risk_follow_up',
   CONTENT_CHANGE = 'content_change',
@@ -67,7 +70,6 @@ export enum CaptureSkipReason {
  */
 export function isKeyboardSuppressibleReason(reason: CaptureReason): boolean {
   return (
-    reason === CaptureReason.PERIODIC_ADAPTIVE ||
     reason === CaptureReason.PERIODIC_FALLBACK ||
     reason === CaptureReason.CONTENT_CHANGE ||
     reason === CaptureReason.SCROLL_SETTLED
@@ -81,6 +83,18 @@ export type CaptureDecision =
       skipReason: CaptureSkipReason;
       pendingReason?: CaptureReason;
     };
+
+/**
+ * Why the native side dropped a capture attempt, reported back one-way via the
+ * `onScreenCaptureRejected` bridge event. Native emits these exact string literals
+ * (no shared type package — kept in sync by convention).
+ *   - `interval_floor`: `captureNow` was inside `MIN_CAPTURE_INTERVAL_MS`; no frame
+ *     was produced, so any armed `forceNextCapture` flag is orphaned — native
+ *     self-clears its own flag and the coordinator clears its mirror.
+ *   - `busy`: a frame was already being processed on the native capture thread; that
+ *     in-flight frame legitimately consumes the force flag, so the mirror is left as-is.
+ */
+export type NativeRejectionReason = 'interval_floor' | 'busy';
 
 export interface CaptureCoordinatorDeps {
   now: () => number;
@@ -106,7 +120,7 @@ const CAPTURE_REASON_PRIORITY: Record<CaptureReason, number> = {
   [CaptureReason.APP_SWITCH_FOLLOW_UP]: 3,
   [CaptureReason.APPSTATE_BACKGROUND]: 3,
   [CaptureReason.MISSION_RESUME]: 3,
-  [CaptureReason.PERIODIC_ADAPTIVE]: 4,
+  // 4 intentionally unused (was PERIODIC_ADAPTIVE, retired in A3c-2) — only relative order matters.
   [CaptureReason.PERIODIC_FALLBACK]: 5,
 };
 
@@ -120,6 +134,11 @@ export function createCaptureCoordinator(deps: CaptureCoordinatorDeps) {
   let lastAcceptedAtMs = Number.NEGATIVE_INFINITY;
   let pendingReason: CaptureReason | null = null;
   let keyboardVisible = false;
+  // Mirror of the native `forceNextCapture` flag: set when a tier-0 reason is
+  // allowed (the hook then arms native), cleared when a frame consumes it
+  // (`onFrameAccepted`) or when the attempt is rejected on the native interval
+  // floor (`onNativeRejected('interval_floor')`).
+  let forceArmedReason: CaptureReason | null = null;
 
   function requestCapture(reason: CaptureReason): CaptureDecision {
     deps.log('capture.requested', {reason});
@@ -169,6 +188,9 @@ export function createCaptureCoordinator(deps: CaptureCoordinatorDeps) {
       return {allowed: false, skipReason};
     }
 
+    if (isForceCaptureReason(reason)) {
+      forceArmedReason = reason;
+    }
     deps.log('capture.allowed', {reason});
     return {allowed: true, reason};
   }
@@ -176,6 +198,28 @@ export function createCaptureCoordinator(deps: CaptureCoordinatorDeps) {
   /** Called when a captured frame is accepted for processing — advances the debounce clock. */
   function onFrameAccepted(atMs: number): void {
     lastAcceptedAtMs = atMs;
+    // The frame consumed any native hash-gate bypass; disarm the mirror.
+    forceArmedReason = null;
+  }
+
+  /**
+   * A native capture attempt was dropped before it produced a frame (see
+   * `NativeRejectionReason`). This must NEVER advance `lastAcceptedAtMs` — no frame
+   * was accepted — and must not touch `pendingReason`. For `interval_floor` it clears
+   * the force-arm mirror so the orphaned bypass doesn't survive to a later unrelated
+   * frame (native self-clears its own flag in the same case). Delivered via a bridge
+   * event, so it is unaffected by RN freezing JS timers while backgrounded.
+   */
+  function onNativeRejected(reason: NativeRejectionReason): void {
+    deps.log('capture.nativeRejected', {reason, forceArmedReason});
+    if (reason === 'interval_floor') {
+      forceArmedReason = null;
+    }
+  }
+
+  /** True while the coordinator believes the native hash-gate bypass is armed. */
+  function isForceArmed(): boolean {
+    return forceArmedReason !== null;
   }
 
   /**
@@ -198,11 +242,14 @@ export function createCaptureCoordinator(deps: CaptureCoordinatorDeps) {
     lastAcceptedAtMs = Number.NEGATIVE_INFINITY;
     pendingReason = null;
     keyboardVisible = false;
+    forceArmedReason = null;
   }
 
   return {
     requestCapture,
     onFrameAccepted,
+    onNativeRejected,
+    isForceArmed,
     setKeyboardVisible,
     takePendingReason,
     reset,

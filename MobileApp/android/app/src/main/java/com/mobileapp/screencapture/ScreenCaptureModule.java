@@ -56,6 +56,16 @@ public class ScreenCaptureModule extends ReactContextBaseJavaModule
     public static final String EVENT_SCREEN_CAPTURED = "onScreenCaptured";
     public static final String EVENT_CAPTURE_ERROR = "onScreenCaptureError";
     public static final String EVENT_DEBUG_LOG = "onScreenCaptureLog";
+    /** One-way signal: an attempt was dropped before producing a frame (interval floor / busy). */
+    public static final String EVENT_CAPTURE_REJECTED = "onScreenCaptureRejected";
+    /** Periodic heartbeat: the native loop ticked. JS decides whether to turn it into a capture. */
+    public static final String EVENT_NATIVE_PERIODIC_TICK = "onNativePeriodicTick";
+    /**
+     * One-way signal: monitoring was live but the MediaProjection is gone and nothing we did
+     * asked for it (system/MIUI revoke, user "Stop" in the cast UI, or a re-grant denial found
+     * a stale running loop). JS reflects reality (monitoring off) and surfaces a re-enable prompt.
+     */
+    public static final String EVENT_MONITORING_REVOKED = "onMonitoringRevoked";
 
     private static final int MIN_BATTERY_PERCENT = 15;
     private static final long MIN_CAPTURE_INTERVAL_MS = 5_000;
@@ -98,11 +108,11 @@ public class ScreenCaptureModule extends ReactContextBaseJavaModule
     private volatile long lastProcessedHash = 0L;
     private volatile boolean hasLastHash = false;
     private volatile long lastProcessedAtMs = 0L;
-    // Known nuance: JS calls forceNextCapture() before captureNow(), but captureNow may
-    // reject on its own MIN_CAPTURE_INTERVAL_MS debounce, so no frame consumes this flag;
-    // it then persists until the next frame arrives (likely a periodic one) and that
-    // frame bypasses the hash gate. Accepted for now — a symptom of the JS/native
-    // debounce split, to be resolved in a later task.
+    // JS calls forceNextCapture() before captureNow(). If captureNow rejects on its own
+    // MIN_CAPTURE_INTERVAL_MS floor no frame consumes this flag, so that branch now
+    // self-clears it (and emits EVENT_CAPTURE_REJECTED so the JS coordinator clears its
+    // mirror). A 'busy' rejection does NOT clear it — the in-flight frame on captureThread
+    // consumes it via getAndSet() below.
     private final AtomicBoolean forceNextCapture = new AtomicBoolean(false);
 
     /** Singleton for optional MainActivity forwarding. */
@@ -233,6 +243,9 @@ public class ScreenCaptureModule extends ReactContextBaseJavaModule
             Log.w(TAG, "MediaProjection permission denied");
             logJs("onActivityResult: user DENIED or cancelled");
             stopMediaProjectionForegroundService();
+            // If a capture loop is somehow still marked running with no valid projection,
+            // this is the same silent-death state a revoke causes — signal it. No-op otherwise.
+            handleInvoluntaryProjectionLoss();
             if (pending != null) {
                 pending.resolve(false);
             }
@@ -244,7 +257,7 @@ public class ScreenCaptureModule extends ReactContextBaseJavaModule
             // Only tear down a previous projection instance, not the result we are about to use.
             if (mediaProjection != null) {
                 logJs("onActivityResult: releasing previous projection before new grant");
-                releaseProjectionSession();
+                releaseProjectionSession(true);
             }
             logJs("onActivityResult: calling getMediaProjection()");
             mediaProjection = projectionManager.getMediaProjection(resultCode, data);
@@ -255,7 +268,7 @@ public class ScreenCaptureModule extends ReactContextBaseJavaModule
                 @Override
                 public void onStop() {
                     Log.i(TAG, "MediaProjection stopped by system");
-                    mainHandler.post(() -> releaseProjectionSession());
+                    mainHandler.post(() -> releaseProjectionSession(false));
                 }
             }, mainHandler);
 
@@ -269,11 +282,13 @@ public class ScreenCaptureModule extends ReactContextBaseJavaModule
         } catch (Exception e) {
             Log.e(TAG, "Failed to initialize MediaProjection", e);
             logJs("onActivityResult FAILED: " + e.getMessage());
-            releaseProjectionSession();
+            releaseProjectionSession(true);
             if (pending != null) {
                 pending.reject("E_PROJECTION", e.getMessage(), e);
             }
             emitError(e.getMessage() != null ? e.getMessage() : "MediaProjection init failed");
+            // Same net as the denial branch: catch a stale running loop left with no projection.
+            handleInvoluntaryProjectionLoss();
         }
     }
 
@@ -328,7 +343,7 @@ public class ScreenCaptureModule extends ReactContextBaseJavaModule
         isRunning.set(false);
         isPaused.set(false);
         cancelCaptureLoop();
-        releaseProjectionSession();
+        releaseProjectionSession(true);
         stopMediaProjectionForegroundService();
         promise.resolve(true);
         Log.i(TAG, "stopCapture — resources released");
@@ -361,7 +376,13 @@ public class ScreenCaptureModule extends ReactContextBaseJavaModule
         }
         long now = System.currentTimeMillis();
         if (now - lastCaptureEmittedAtMs < MIN_CAPTURE_INTERVAL_MS) {
-            logJs("captureNow skipped — debounce (" + (now - lastCaptureEmittedAtMs) + "ms)");
+            long elapsed = now - lastCaptureEmittedAtMs;
+            logJs("captureNow skipped — debounce (" + elapsed + "ms)");
+            // No frame will be produced for this attempt — disarm the orphaned
+            // hash-gate bypass so an unrelated later frame doesn't skip the gate,
+            // and tell JS one-way so its coordinator does the same + keeps its clock.
+            forceNextCapture.set(false);
+            emitCaptureRejected("interval_floor", elapsed);
             promise.resolve(false);
             return;
         }
@@ -433,7 +454,7 @@ public class ScreenCaptureModule extends ReactContextBaseJavaModule
     public void onHostDestroy() {
         isRunning.set(false);
         cancelCaptureLoop();
-        releaseProjectionSession();
+        releaseProjectionSession(true);
         stopMediaProjectionForegroundService();
         shutdownCaptureThread();
     }
@@ -447,6 +468,14 @@ public class ScreenCaptureModule extends ReactContextBaseJavaModule
   // Capture loop
   // ---------------------------------------------------------------------------
 
+    /**
+     * The periodic loop no longer captures directly. Each tick it emits
+     * {@link #EVENT_NATIVE_PERIODIC_TICK}; JS ({@code useScreenshotCapture}) subsamples
+     * it to the effective adaptive interval and routes survivors through the capture
+     * coordinator. The tick is gated by the same conditions the old direct-capture path
+     * used ({@code isRunning}/{@code !isPaused}/{@code isProjectionReady}/
+     * {@code !shouldSkipCapture()}), so battery-saver / screen-off pause it exactly as before.
+     */
     private void scheduleCaptureLoop() {
         cancelCaptureLoop();
         captureLoopRunnable = new Runnable() {
@@ -455,11 +484,9 @@ public class ScreenCaptureModule extends ReactContextBaseJavaModule
                 if (!isRunning.get() || isPaused.get()) {
                     return;
                 }
-                if (shouldSkipCapture()) {
-                    captureHandler.postDelayed(this, intervalMs);
-                    return;
+                if (isProjectionReady.get() && !shouldSkipCapture()) {
+                    emitNativePeriodicTick();
                 }
-                captureSingleFrame();
                 captureHandler.postDelayed(this, intervalMs);
             }
         };
@@ -494,6 +521,9 @@ public class ScreenCaptureModule extends ReactContextBaseJavaModule
         }
         if (!isFrameInProgress.compareAndSet(false, true)) {
             Log.d(TAG, "Skipping capture — previous frame in progress");
+            // A frame is already on captureThread and will consume forceNextCapture
+            // itself — do NOT clear it here. Signal JS one-way (no elapsed — N/A).
+            emitCaptureRejected("busy");
             return;
         }
 
@@ -669,8 +699,20 @@ public class ScreenCaptureModule extends ReactContextBaseJavaModule
         }
     }
 
-  /** Stops capture loop, VirtualDisplay, and MediaProjection token. */
-    private void releaseProjectionSession() {
+    /**
+     * Stops VirtualDisplay + the MediaProjection token and resets the hash gate.
+     *
+     * <p>{@code mediaProjection.stop()} itself fires {@link MediaProjection.Callback#onStop()},
+     * so this method is re-entrant on every path. {@code voluntary} says who asked:
+     * <ul>
+     *   <li>{@code true} — {@code stopCapture()} / {@code onHostDestroy()} / an
+     *       {@code onActivityResult} re-grant or init failure. Silent.</li>
+     *   <li>{@code false} — only {@code MediaProjection.Callback.onStop}, i.e. the system
+     *       (or the user via the cast UI) killed the projection under us. Routes to
+     *       {@link #handleInvoluntaryProjectionLoss()}.</li>
+     * </ul>
+     */
+    private void releaseProjectionSession(boolean voluntary) {
         tearDownVirtualDisplay();
         if (mediaProjection != null) {
             try {
@@ -687,6 +729,27 @@ public class ScreenCaptureModule extends ReactContextBaseJavaModule
         lastProcessedHash = 0L;
         lastProcessedAtMs = 0L;
         forceNextCapture.set(false);
+        if (!voluntary) {
+            handleInvoluntaryProjectionLoss();
+        }
+    }
+
+    /**
+     * A capture loop was live but the projection is gone and nothing we did asked for it.
+     * Idempotent: {@code isRunning.getAndSet(false)} means this fires its teardown + the
+     * {@link #EVENT_MONITORING_REVOKED} signal at most once, and only when monitoring was
+     * actually running (the re-entrant {@code onStop} from our own {@code stop()} and the
+     * normal {@code onActivityResult} denial both fall through as no-ops).
+     */
+    private void handleInvoluntaryProjectionLoss() {
+        if (!isRunning.getAndSet(false)) {
+            return;
+        }
+        isPaused.set(false);
+        cancelCaptureLoop();
+        stopMediaProjectionForegroundService();
+        emitMonitoringRevoked();
+        Log.w(TAG, "MediaProjection revoked mid-session — emitted onMonitoringRevoked");
     }
 
   // ---------------------------------------------------------------------------
@@ -773,6 +836,38 @@ public class ScreenCaptureModule extends ReactContextBaseJavaModule
             map.putString("message", message);
             sendEvent(EVENT_CAPTURE_ERROR, map);
         });
+    }
+
+    /** `busy` variant — elapsed is not applicable, so the key is omitted (no sentinel). */
+    private void emitCaptureRejected(String reason) {
+        WritableMap map = Arguments.createMap();
+        map.putString("reason", reason);
+        map.putDouble("timestamp", System.currentTimeMillis());
+        sendEvent(EVENT_CAPTURE_REJECTED, map);
+    }
+
+    /** `interval_floor` variant — carries ms since the last emitted frame. */
+    private void emitCaptureRejected(String reason, long elapsedMs) {
+        WritableMap map = Arguments.createMap();
+        map.putString("reason", reason);
+        map.putDouble("elapsedMs", elapsedMs);
+        map.putDouble("timestamp", System.currentTimeMillis());
+        sendEvent(EVENT_CAPTURE_REJECTED, map);
+    }
+
+    /** Periodic loop heartbeat — payload is just a wall-clock timestamp. */
+    private void emitNativePeriodicTick() {
+        WritableMap map = Arguments.createMap();
+        map.putDouble("timestamp", System.currentTimeMillis());
+        sendEvent(EVENT_NATIVE_PERIODIC_TICK, map);
+    }
+
+    /** Involuntary projection loss — JS turns monitoring off and prompts a re-enable. */
+    private void emitMonitoringRevoked() {
+        WritableMap map = Arguments.createMap();
+        map.putString("reason", "projection_revoked");
+        map.putDouble("timestamp", System.currentTimeMillis());
+        sendEvent(EVENT_MONITORING_REVOKED, map);
     }
 
     private void sendEvent(String eventName, WritableMap params) {

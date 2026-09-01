@@ -104,6 +104,15 @@ export function ScreenMonitor({
     };
   }, [isMonitoring]);
 
+  // Keep the switch honest: if the hook drops monitoring on its own (e.g. the system
+  // revoked screen-capture permission mid-session), snap the toggle off. No-op on the
+  // voluntary on/off paths, where `enabled` and `isMonitoring` already agree.
+  useEffect(() => {
+    if (!isMonitoring) {
+      setEnabled(false);
+    }
+  }, [isMonitoring]);
+
   useEffect(() => {
     if (Platform.OS === 'android') {
       void refreshUsageAccess();
