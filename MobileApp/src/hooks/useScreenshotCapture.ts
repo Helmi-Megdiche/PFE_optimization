@@ -38,6 +38,7 @@ import {
   RISK_INTERVAL_LOW_MS,
   SCROLL_SETTLE_COOLDOWN_MS,
   SCROLL_SETTLE_MS,
+  type ProcessingPhase,
   type ScrollSettleState,
 } from '../utils/adaptiveCapture';
 import {
@@ -185,6 +186,20 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
   const isProcessingRef = useRef(false);
   const processingStartTimeRef = useRef(0);
   const processingGenerationRef = useRef(0);
+  /**
+   * D1: which guarded region of `processCapturedFrame` the current frame is in
+   * (backgrounded-safe substitute for the frozen-timer `withTimeout` guards —
+   * see `adaptiveCapture.ts`'s "Per-phase capture deadlines" block). Written
+   * 1:1 with `processingStartTimeRef`: set wherever that ref is set to
+   * `Date.now()`, reset to `{ phase: 'idle', startedAtMs: 0 }` wherever that
+   * ref is reset to `0`. A missed reset degrades to the 60s absolute backstop
+   * (see `shouldForceReleasePhase`'s anti-stale guard), never to a spurious
+   * release.
+   */
+  const processingPhaseRef = useRef<{
+    phase: ProcessingPhase;
+    startedAtMs: number;
+  }>({ phase: 'idle', startedAtMs: 0 });
   /** Latest frame deferred while OCR was busy — processed after current finishes. */
   const pendingFrameRef = useRef<ScreenCapturedEvent | null>(null);
   const processCapturedFrameRef = useRef<
@@ -506,10 +521,37 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
       processingStartTimeRef.current > 0
         ? Date.now() - processingStartTimeRef.current
         : 0;
+    const { phase } = processingPhaseRef.current;
     processingGenerationRef.current += 1;
     isProcessingRef.current = false;
     processingStartTimeRef.current = 0;
-    scWarn('Processing lock force-released after hung frame', { cause, elapsed });
+    processingPhaseRef.current = { phase: 'idle', startedAtMs: 0 };
+    scWarn('Processing lock force-released after hung frame', {
+      cause,
+      elapsed,
+      phase,
+      appState: AppState.currentState,
+    });
+  }, []);
+
+  /**
+   * D1: advances `processingPhaseRef` and logs the phase being *left* with its
+   * duration — logging on exit (not entry) is what lets `frame.phase` answer
+   * "how long did `vision` actually take backgrounded", which is the evidence
+   * Debt 1 needs before a `vision` deadline can be set. Also doubles as the JS
+   * half of the app-switch-burst instrumentation (recon §2): `appState` on
+   * each transition shows whether wedges cluster on backgrounded-at-phase-start.
+   */
+  const setPhase = useCallback((next: ProcessingPhase) => {
+    const now = Date.now();
+    const prev = processingPhaseRef.current;
+    scLog('frame.phase', {
+      from: prev.phase,
+      to: next,
+      appState: AppState.currentState,
+      ...(prev.startedAtMs > 0 ? { prevPhaseMs: now - prev.startedAtMs } : {}),
+    });
+    processingPhaseRef.current = { phase: next, startedAtMs: now };
   }, []);
 
   const processCapturedFrame = useCallback(
@@ -525,6 +567,7 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
           processingGenerationRef.current += 1;
           isProcessingRef.current = false;
           processingStartTimeRef.current = 0;
+          processingPhaseRef.current = { phase: 'idle', startedAtMs: 0 };
           pendingFrameRef.current = null;
           scWarn('OCR lock takeover — previous frame hung', { elapsedMs: elapsed });
         } else {
@@ -538,6 +581,7 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
       const generation = ++processingGenerationRef.current;
       isProcessingRef.current = true;
       processingStartTimeRef.current = Date.now();
+      setPhase('foreground_lookup');
       const { filePath, imageUri, appPackage } = event;
       const isActive = () => processingGenerationRef.current === generation;
 
@@ -548,6 +592,7 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
         processingGenerationRef.current += 1;
         isProcessingRef.current = false;
         processingStartTimeRef.current = 0;
+        processingPhaseRef.current = { phase: 'idle', startedAtMs: 0 };
         scWarn('Processing watchdog — stale frame aborted', {
           filePath,
           timeoutMs: FRAME_PROCESSING_WATCHDOG_MS,
@@ -713,6 +758,7 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
         });
         setLastForegroundApp(resolvedPackage);
 
+        setPhase('vision');
         const visionResult = await withTimeout(
           Promise.all([
             extractTextMixed(ocrInput, { filePath, appPackage: resolvedPackage }),
@@ -908,6 +954,7 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
           return { success: false, skippedReason: 'stale' };
         }
 
+        setPhase('api_post');
         const screenEventResponse = await withTimeout(
           postScreenEvent(payload),
           API_POST_TIMEOUT_MS,
@@ -1001,6 +1048,11 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
         processingStartTimeRef.current = 0;
         if (processingGenerationRef.current === generation) {
           isProcessingRef.current = false;
+          // Guarded by generation, deliberately unlike the unconditional
+          // `processingStartTimeRef.current = 0` two lines above (pre-existing;
+          // see D1 report) — a stale frame's `finally` running late must not
+          // stomp the phase of whatever frame is actually active now.
+          setPhase('idle');
         }
         const deferredFrame = pendingFrameRef.current;
         pendingFrameRef.current = null;
@@ -1030,6 +1082,7 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
       triggerAppSwitchCapture,
       updateRiskAndInterval,
       forceReleaseProcessingLock,
+      setPhase,
     ],
   );
 
@@ -1500,11 +1553,23 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
           livenessThresholdMs: OCR_LOCK_LIVENESS_MS,
           lastPeriodicPassAtMs: lastPeriodicPassAtRef.current,
           dynamicIntervalMs: dynamicIntervalMsRef.current,
+          phase: processingPhaseRef.current.phase,
+          phaseStartedAtMs: processingPhaseRef.current.startedAtMs,
         });
         if (action === 'forceReleaseLock') {
           forceReleaseProcessingLock('tick-liveness');
           // Next tick (~5s) re-issues a capture through the coordinator, now
           // that isProcessing() is false again.
+          return;
+        }
+        // D1: backgrounded-safe substitute for the frozen-timer `withTimeout`
+        // guards, on the two phases with an unambiguous deadline (`vision` has
+        // none yet — falls through to the absolute 60s check above instead;
+        // see `PHASE_DEADLINE_MS`). Cause string names the phase for smoke
+        // attribution and defence-log triage.
+        if (action === 'forceReleasePhase') {
+          const { phase } = processingPhaseRef.current;
+          forceReleaseProcessingLock(`tick-phase-timeout:${phase}`);
           return;
         }
         if (action === 'emitCapture') {

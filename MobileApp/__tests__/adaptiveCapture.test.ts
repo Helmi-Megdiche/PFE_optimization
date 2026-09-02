@@ -6,6 +6,7 @@ import {
   initialScrollSettleState,
   NATIVE_TICK_INTERVAL_MS,
   OCR_LOCK_LIVENESS_MS,
+  PHASE_DEADLINE_MS,
   pushRiskScore,
   recordScrollEvent,
   RISK_INTERVAL_HIGH_MS,
@@ -14,6 +15,7 @@ import {
   SCROLL_SETTLE_COOLDOWN_MS,
   SCROLL_SETTLE_MS,
   shouldEmitPeriodicCapture,
+  shouldForceReleasePhase,
   shouldForceReleaseProcessingLock,
 } from '../src/utils/adaptiveCapture';
 
@@ -274,7 +276,14 @@ describe('decideTickAction (native-tick action: liveness backstop before subsamp
     ).toBe('emitCapture');
   });
 
-  it('boundary: at threshold + 1ms with a due subsample it force-releases and never emits (clip-risk case, e.g. a slow ~45s Arabic frame)', () => {
+  // Note (D1): "a slow ~45s Arabic frame" below is an UNMEASURED hypothetical —
+  // it justified this 60s threshold when written, not a measurement. No
+  // backgrounded vision-phase duration has ever been logged in this codebase.
+  // That is precisely why D1's `vision` phase deadline is `null` (see
+  // `PHASE_DEADLINE_MS` / the `shouldForceReleasePhase` describe block below)
+  // and deliberately falls through to this 60s backstop rather than guessing a
+  // tighter number — see Debt 1 in the D1 plan for what would justify one.
+  it('boundary: at threshold + 1ms with a due subsample it force-releases and never emits (clip-risk case, e.g. a slow ~45s Arabic frame — unmeasured, see note above)', () => {
     const action = decideTickAction({
       isProcessing: true,
       processingStartAtMs: 1_000,
@@ -295,6 +304,229 @@ describe('decideTickAction (native-tick action: liveness backstop before subsamp
         nowMs: 1_000 + THRESHOLD - 1,
         livenessThresholdMs: THRESHOLD,
         lastPeriodicPassAtMs: Number.NEGATIVE_INFINITY,
+        dynamicIntervalMs: 20_000,
+      }),
+    ).toBe('emitCapture');
+  });
+});
+
+describe('shouldForceReleasePhase (D1: backgrounded-safe per-phase deadline)', () => {
+  it('vision has no deadline (deliberately deferred — see PHASE_DEADLINE_MS)', () => {
+    expect(PHASE_DEADLINE_MS.vision).toBeNull();
+    expect(PHASE_DEADLINE_MS.foreground_lookup).not.toBeNull();
+    expect(PHASE_DEADLINE_MS.api_post).not.toBeNull();
+  });
+
+  it('never fires for "vision" regardless of elapsed — regression guard against silently filling the number in', () => {
+    expect(
+      shouldForceReleasePhase('vision', 1_000, 1_000 + 10 * 60_000, 500, true),
+    ).toBe(false);
+  });
+
+  it('never fires for "idle" regardless of elapsed', () => {
+    expect(
+      shouldForceReleasePhase('idle', 1_000, 1_000 + 10 * 60_000, 500, true),
+    ).toBe(false);
+  });
+
+  it('never fires when phaseStartedAtMs is unset (0)', () => {
+    expect(
+      shouldForceReleasePhase('foreground_lookup', 0, 1_000_000, 500, true),
+    ).toBe(false);
+  });
+
+  it('never fires when phaseStartedAtMs is negative', () => {
+    expect(
+      shouldForceReleasePhase('foreground_lookup', -5, 1_000_000, 500, true),
+    ).toBe(false);
+  });
+
+  it('never fires when nothing is being processed (isProcessing: false)', () => {
+    expect(
+      shouldForceReleasePhase('api_post', 1_000, 1_000 + 60_000, 500, false),
+    ).toBe(false);
+  });
+
+  it('anti-stale guard: never fires when the phase ref predates the frame it claims to belong to, even far past the deadline', () => {
+    // A frame started at 40_000; a phase ref claims to have started at 1_000
+    // (before the frame existed) — a stale ref left over by a missed reset.
+    // Without this guard a 30s-old healthy frame carrying such a ref would be
+    // force-released; the absolute-first ordering in decideTickAction does not
+    // catch this case because 30s < the 60s backstop.
+    expect(
+      shouldForceReleasePhase('api_post', 1_000, 100_000, 40_000, true),
+    ).toBe(false);
+  });
+
+  it('anti-stale guard: fires normally when the phase ref is exactly as old as the frame (equal timestamps, the common case)', () => {
+    expect(
+      shouldForceReleasePhase(
+        'foreground_lookup',
+        1_000,
+        1_000 + PHASE_DEADLINE_MS.foreground_lookup!,
+        1_000,
+        true,
+      ),
+    ).toBe(true);
+  });
+
+  it.each([
+    ['foreground_lookup', PHASE_DEADLINE_MS.foreground_lookup!],
+    ['api_post', PHASE_DEADLINE_MS.api_post!],
+  ] as const)(
+    'boundary pair: %s does not fire at deadline-1ms, fires at deadline',
+    (phase, deadline) => {
+      expect(
+        shouldForceReleasePhase(phase, 1_000, 1_000 + deadline - 1, 1_000, true),
+      ).toBe(false);
+      expect(
+        shouldForceReleasePhase(phase, 1_000, 1_000 + deadline, 1_000, true),
+      ).toBe(true);
+    },
+  );
+
+  it('every non-null PHASE_DEADLINE_MS value is a whole multiple of NATIVE_TICK_INTERVAL_MS, exceeds its withTimeout budget, and stays under OCR_LOCK_LIVENESS_MS', () => {
+    const budgetMs = { foreground_lookup: 2_500, api_post: 12_000 } as const;
+    (['foreground_lookup', 'api_post'] as const).forEach((phase) => {
+      const deadline = PHASE_DEADLINE_MS[phase];
+      expect(deadline).not.toBeNull();
+      expect(deadline! % NATIVE_TICK_INTERVAL_MS).toBe(0);
+      expect(deadline!).toBeGreaterThan(budgetMs[phase]);
+      expect(deadline!).toBeLessThan(OCR_LOCK_LIVENESS_MS);
+    });
+  });
+});
+
+describe('decideTickAction — phase timeout composition (D1)', () => {
+  it('returns forceReleasePhase when a live phase is past its deadline and the 60s absolute is not', () => {
+    expect(
+      decideTickAction({
+        isProcessing: true,
+        processingStartAtMs: 1_000,
+        nowMs: 1_000 + PHASE_DEADLINE_MS.api_post!,
+        livenessThresholdMs: OCR_LOCK_LIVENESS_MS,
+        lastPeriodicPassAtMs: Number.NEGATIVE_INFINITY,
+        dynamicIntervalMs: 20_000,
+        phase: 'api_post',
+        phaseStartedAtMs: 1_000,
+      }),
+    ).toBe('forceReleasePhase');
+  });
+
+  it('a "vision" phase at 55s does not force-release (no phase deadline) — falls through to emitCapture/noop', () => {
+    const action = decideTickAction({
+      isProcessing: true,
+      processingStartAtMs: 1_000,
+      nowMs: 1_000 + 55_000,
+      livenessThresholdMs: OCR_LOCK_LIVENESS_MS,
+      lastPeriodicPassAtMs: Number.NEGATIVE_INFINITY,
+      dynamicIntervalMs: 20_000,
+      phase: 'vision',
+      phaseStartedAtMs: 1_000,
+    });
+    expect(action).not.toBe('forceReleasePhase');
+  });
+
+  it('the same "vision" frame force-releases via the absolute backstop once it crosses 60s', () => {
+    expect(
+      decideTickAction({
+        isProcessing: true,
+        processingStartAtMs: 1_000,
+        nowMs: 1_000 + 65_000,
+        livenessThresholdMs: OCR_LOCK_LIVENESS_MS,
+        lastPeriodicPassAtMs: Number.NEGATIVE_INFINITY,
+        dynamicIntervalMs: 20_000,
+        phase: 'vision',
+        phaseStartedAtMs: 1_000,
+      }),
+    ).toBe('forceReleaseLock');
+  });
+
+  it('the 60s backstop still fires when the phase ref is stale (younger than 60s, but the frame itself is 70s old)', () => {
+    expect(
+      decideTickAction({
+        isProcessing: true,
+        processingStartAtMs: 1_000,
+        nowMs: 1_000 + 70_000,
+        livenessThresholdMs: OCR_LOCK_LIVENESS_MS,
+        lastPeriodicPassAtMs: Number.NEGATIVE_INFINITY,
+        dynamicIntervalMs: 20_000,
+        phase: 'api_post',
+        phaseStartedAtMs: 1_000 + 68_000, // phase "started" 2s ago
+      }),
+    ).toBe('forceReleaseLock');
+  });
+
+  it('the 60s backstop still fires when the phase ref is unset — regression guard for a forgotten reset site', () => {
+    expect(
+      decideTickAction({
+        isProcessing: true,
+        processingStartAtMs: 1_000,
+        nowMs: 1_000 + 65_000,
+        livenessThresholdMs: OCR_LOCK_LIVENESS_MS,
+        lastPeriodicPassAtMs: Number.NEGATIVE_INFINITY,
+        dynamicIntervalMs: 20_000,
+        // phase / phaseStartedAtMs omitted — defaults to 'idle' / 0
+      }),
+    ).toBe('forceReleaseLock');
+  });
+
+  it('phase timeout beats a due subsample gate', () => {
+    const now = 1_000 + PHASE_DEADLINE_MS.api_post! + 1_000;
+    expect(
+      decideTickAction({
+        isProcessing: true,
+        processingStartAtMs: 1_000,
+        nowMs: now,
+        livenessThresholdMs: OCR_LOCK_LIVENESS_MS,
+        lastPeriodicPassAtMs: now - 30_000, // due
+        dynamicIntervalMs: 20_000,
+        phase: 'api_post',
+        phaseStartedAtMs: 1_000,
+      }),
+    ).toBe('forceReleasePhase');
+  });
+
+  it('phase timeout fires during a game (dynamicIntervalMs 0), where the subsample gate would never pass', () => {
+    expect(
+      decideTickAction({
+        isProcessing: true,
+        processingStartAtMs: 1_000,
+        nowMs: 1_000 + PHASE_DEADLINE_MS.foreground_lookup!,
+        livenessThresholdMs: OCR_LOCK_LIVENESS_MS,
+        lastPeriodicPassAtMs: Number.NEGATIVE_INFINITY,
+        dynamicIntervalMs: 0,
+        phase: 'foreground_lookup',
+        phaseStartedAtMs: 1_000,
+      }),
+    ).toBe('forceReleasePhase');
+  });
+
+  it('a healthy frame mid-api_post at 10s with a due subsample still emits — the phase deadline does not block routine capture below its threshold', () => {
+    expect(
+      decideTickAction({
+        isProcessing: true,
+        processingStartAtMs: 1_000,
+        nowMs: 1_000 + 10_000,
+        livenessThresholdMs: OCR_LOCK_LIVENESS_MS,
+        lastPeriodicPassAtMs: Number.NEGATIVE_INFINITY,
+        dynamicIntervalMs: 20_000,
+        phase: 'api_post',
+        phaseStartedAtMs: 1_000,
+      }),
+    ).toBe('emitCapture');
+  });
+
+  it('the 8 pre-D1 decideTickAction tests above pass unchanged — phase params are optional and default to the never-firing "idle"', () => {
+    // Regression guard, not a new behavioral assertion: re-run the exact
+    // pre-D1 liveness-vs-subsample case with no phase params at all.
+    expect(
+      decideTickAction({
+        isProcessing: false,
+        processingStartAtMs: 0,
+        nowMs: 100_000,
+        livenessThresholdMs: OCR_LOCK_LIVENESS_MS,
+        lastPeriodicPassAtMs: 80_000,
         dynamicIntervalMs: 20_000,
       }),
     ).toBe('emitCapture');

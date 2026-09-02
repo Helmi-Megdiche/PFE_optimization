@@ -74,13 +74,148 @@ export function shouldForceReleaseProcessingLock(
   return nowMs - processingStartAtMs >= thresholdMs;
 }
 
-export type TickAction = 'forceReleaseLock' | 'emitCapture' | 'noop';
+/* ------------------------------------------------------------------ *
+ *  Per-phase capture deadlines (D1)                                   *
+ * ------------------------------------------------------------------ *
+ * `withTimeout(p, ms, fallback)` races `p` against a JS `setTimeout`. RN
+ * freezes that timer while backgrounded, so if `p` never settles the race
+ * never settles, the `await` in `processCapturedFrame` parks, its `finally`
+ * never runs and `isProcessingRef` stays latched — monitoring goes blind
+ * until {@link OCR_LOCK_LIVENESS_MS}. Three device-observed incidents in two
+ * days; two of the three call sites confirmed wedging.
+ *
+ * This is NOT a cancellation problem: `processingGenerationRef` already
+ * neutralizes a late-settling stale run (it fails every `isActive()`
+ * checkpoint, and its `finally` refuses to clear a newer run's lock). The
+ * problem reduces to "make a timeout that fires while backgrounded, tighter
+ * than 60s" — which the native tick can do, being the one clock that survives
+ * backgrounding.
+ *
+ * The `withTimeout` call sites stay exactly as they are: they are the precise
+ * fast path when foregrounded (2.5 / 25 / 12s) and merely inert when not.
+ * Every deadline below sits ABOVE its `withTimeout` budget, so foregrounded
+ * the `withTimeout` always wins the race and these never fire — no `AppState`
+ * gate is needed and the reducer stays pure and unconditional.
+ */
+
+/** Which guarded region of `processCapturedFrame` a frame is currently in. */
+export type ProcessingPhase =
+  | 'idle'
+  | 'foreground_lookup'
+  | 'vision'
+  | 'api_post';
 
 /**
- * The single pure place that encodes tick-handler ordering: the OCR-lock
- * liveness backstop is evaluated BEFORE the subsample gate, so a lock wedged
- * during a game (target 0) or a long education interval (120s) is still
- * cleared. Returns what the tick handler should do this tick.
+ * Backgrounded-safe deadline per phase. Each is a whole multiple of
+ * {@link NATIVE_TICK_INTERVAL_MS} (the tick is the only evaluator) and sits
+ * strictly between its `withTimeout` budget and {@link OCR_LOCK_LIVENESS_MS}.
+ *
+ * - `foreground_lookup` (budget 2.5s → 10s): the *outer* `withTimeout` caps the
+ *   whole `resolveForegroundAppWithRetry(3, 200)` chain at 2.5s foregrounded —
+ *   the inner per-attempt guards never get three runs — and backgrounded a
+ *   healthy UsageStats Binder reply is sub-100ms. 4x headroom over the only
+ *   legitimate duration.
+ * - `vision` (budget 25s): **deliberately `null` — no phase deadline yet.**
+ *   `VISION_PIPELINE_TIMEOUT_MS` (25s) is the app's own policy for how long
+ *   vision may run; foregrounded, `withTimeout` enforces it and anything past
+ *   25s dies. A backgrounded run that takes 40s+ is therefore not legitimate
+ *   work being clipped — it already exceeds the one policy that exists. But
+ *   picking a number (40s, 45s, ...) here would invent a second, looser
+ *   backgrounded policy on no evidence: no measured backgrounded vision
+ *   duration exists in this codebase or its history. The only figure that ever
+ *   looked like evidence was a hypothetical in a test comment written to
+ *   justify the 60s threshold, not a measurement — see the boundary test below.
+ *   Guessing low risks clipping a legitimately slow Arabic/Derja OCR pass,
+ *   which is exactly the content the keyword filter targets — a detection gap
+ *   is worse than 60s of blindness. So `vision` runs on the
+ *   {@link OCR_LOCK_LIVENESS_MS} backstop until real backgrounded durations
+ *   (Arabic path included) are collected via the `frame.phase` log and a
+ *   deadline can be set at ~1.5x the observed p95.
+ * - `api_post` (budget 12s → 20s): 1.67x.
+ */
+export const PHASE_DEADLINE_MS: Record<
+  Exclude<ProcessingPhase, 'idle'>,
+  number | null
+> = {
+  foreground_lookup: 10_000,
+  vision: null,
+  api_post: 20_000,
+};
+
+/**
+ * True ⇒ the current phase has run past its deadline and the processing lock
+ * must be force-released. Pure; evaluated from the native tick.
+ *
+ * Returns false for `'idle'`, a non-positive start stamp, a `null` deadline
+ * (`vision`, see {@link PHASE_DEADLINE_MS}), and when nothing is being
+ * processed — mirroring {@link shouldForceReleaseProcessingLock}'s guards —
+ * so a missed phase-ref reset degrades to "the 60s absolute backstop handles
+ * it", never to a spurious release.
+ *
+ * Anti-stale guard: also false when `phaseStartedAtMs < processingStartAtMs`.
+ * A phase cannot predate the frame it belongs to, so a ref left over from a
+ * previous frame (a missed reset) is rejected outright rather than relying on
+ * reset discipline alone. This is the clause the absolute-first ordering in
+ * {@link decideTickAction} does NOT cover: a 30s-old healthy frame carrying a
+ * stale ref claiming `api_post` started 45s ago would otherwise be
+ * force-released (30s < the 60s backstop, so that check stays silent).
+ */
+export function shouldForceReleasePhase(
+  phase: ProcessingPhase,
+  phaseStartedAtMs: number,
+  nowMs: number,
+  processingStartAtMs: number,
+  isProcessing: boolean,
+): boolean {
+  if (!isProcessing) {
+    return false;
+  }
+  if (phase === 'idle') {
+    return false;
+  }
+  if (phaseStartedAtMs <= 0) {
+    return false;
+  }
+  if (phaseStartedAtMs < processingStartAtMs) {
+    return false;
+  }
+  const deadline = PHASE_DEADLINE_MS[phase];
+  if (deadline === null) {
+    return false;
+  }
+  return nowMs - phaseStartedAtMs >= deadline;
+}
+
+export type TickAction =
+  | 'forceReleaseLock'
+  | 'forceReleasePhase'
+  | 'emitCapture'
+  | 'noop';
+
+/**
+ * The single pure place that encodes tick-handler ordering. Branch order, and
+ * why it is this order:
+ *
+ *   1. absolute lock liveness ({@link OCR_LOCK_LIVENESS_MS}, unchanged) —
+ *      evaluated FIRST so it is the check that cannot be bypassed by a
+ *      phase-ref bug. If the phase ref is `'idle'`, unset, or stale (says
+ *      `api_post` started 2s ago on a frame that is actually 70s old), the phase
+ *      predicate returns false and this still fires (the anti-stale guard in
+ *      {@link shouldForceReleasePhase} covers the case position alone cannot:
+ *      a stale ref *younger* than the frame). The A3c-2c backstop stays the
+ *      last line of defence, enforced by position. Ordering it first costs
+ *      nothing: the live phase deadlines (10/20s) are shorter in wall-clock
+ *      terms, so they still win in practice. `vision` has no phase deadline
+ *      (see {@link PHASE_DEADLINE_MS}) and always falls through to this check.
+ *      When both would fire, the frame IS 60s+ old regardless of phase, so
+ *      `'forceReleaseLock'` is the truthful attribution.
+ *   2. per-phase deadline (D1) — the backgrounded substitute for `withTimeout`.
+ *   3. subsample gate — a lock wedged during a game (target 0) or a long
+ *      education interval (120s) must still be cleared, so both release checks
+ *      precede it.
+ *
+ * `phase` / `phaseStartedAtMs` are optional and default to the never-firing
+ * `'idle'`, so pre-D1 callers and tests keep their exact behaviour.
  */
 export function decideTickAction(params: {
   isProcessing: boolean;
@@ -89,6 +224,8 @@ export function decideTickAction(params: {
   livenessThresholdMs: number;
   lastPeriodicPassAtMs: number;
   dynamicIntervalMs: number;
+  phase?: ProcessingPhase;
+  phaseStartedAtMs?: number;
 }): TickAction {
   if (
     shouldForceReleaseProcessingLock(
@@ -99,6 +236,17 @@ export function decideTickAction(params: {
     )
   ) {
     return 'forceReleaseLock';
+  }
+  if (
+    shouldForceReleasePhase(
+      params.phase ?? 'idle',
+      params.phaseStartedAtMs ?? 0,
+      params.nowMs,
+      params.processingStartAtMs,
+      params.isProcessing,
+    )
+  ) {
+    return 'forceReleasePhase';
   }
   if (
     shouldEmitPeriodicCapture(
