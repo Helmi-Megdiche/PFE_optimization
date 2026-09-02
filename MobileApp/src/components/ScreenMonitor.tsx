@@ -90,7 +90,6 @@ export function ScreenMonitor({
     avgRiskScore,
     lastError,
     lastCaptureAt,
-    requestPermission,
     refreshUsageAccess,
     openUsageAccessSettings,
     startMonitoring,
@@ -372,14 +371,6 @@ export function ScreenMonitor({
             {lastError}
           </AppText>
         </Card>
-      ) : null}
-
-      {!permissionGranted ? (
-        <Button
-          label="Request MediaProjection permission"
-          onPress={() => void requestPermission()}
-          disabled={isBusy}
-        />
       ) : null}
     </View>
   );

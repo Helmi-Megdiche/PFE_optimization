@@ -330,6 +330,16 @@ public class ScreenCaptureModule extends ReactContextBaseJavaModule
             scheduleCaptureLoop();
             promise.resolve(true);
             logJs("startCapture SUCCESS — loop scheduled");
+        } catch (SecurityException | IllegalStateException e) {
+            // Dead/idle MediaProjection token — Android 14 idle-times-out a token that
+            // never called createVirtualDisplay, and the failure only surfaces here
+            // (also covers ensureVirtualDisplay's "MediaProjection is null"). Drop the
+            // session (voluntary — isRunning was never set on this path) so JS
+            // re-requests fresh consent on retry.
+            Log.w(TAG, "startCapture — projection token stale, releasing", e);
+            logJs("startCapture STALE PROJECTION: " + e.getMessage());
+            releaseProjectionSession(true);
+            promise.reject("E_STALE_PROJECTION", e.getMessage(), e);
         } catch (Exception e) {
             Log.e(TAG, "startCapture failed", e);
             logJs("startCapture FAILED: " + e.getMessage());
@@ -556,7 +566,10 @@ public class ScreenCaptureModule extends ReactContextBaseJavaModule
                         || (nowMs - lastProcessedAtMs >= HASH_STALENESS_MS)
                         || hamming > HASH_CHANGE_THRESHOLD;
                 if (!process) {
-                    logJs("frame.skipped.unchanged hamming=" + hamming);
+                    // Raw hash bundled in temporarily (stale-token brief) to tell a dead
+                    // capture source apart from dHash coarseness — remove before defence.
+                    logJs("frame.skipped.unchanged hamming=" + hamming
+                            + " hash=" + Long.toHexString(hash));
                     return;
                 }
                 lastProcessedHash = hash;

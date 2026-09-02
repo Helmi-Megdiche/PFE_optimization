@@ -1261,7 +1261,29 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
         return false;
       }
 
-      await native.startCapture(NATIVE_TICK_INTERVAL_MS);
+      try {
+        await native.startCapture(NATIVE_TICK_INTERVAL_MS);
+      } catch (startErr) {
+        // Retry ONLY on the stale/dead-token codes. E_STALE_PROJECTION is the
+        // native catch; E_CAPTURE is how the same stale token surfaces on a build
+        // without that catch. Anything else (e.g. E_INTERVAL — a bad constant, not
+        // a recoverable state) rethrows immediately: no teardown, no consent dialog.
+        const code = (startErr as { code?: string } | null)?.code;
+        if (code !== 'E_STALE_PROJECTION' && code !== 'E_CAPTURE') {
+          throw startErr;
+        }
+        scWarn('startCapture rejected (stale token) — retrying once with fresh consent', startErr);
+        try {
+          await native.stopCapture();
+        } catch (stopErr) {
+          scWarn('stopCapture during retry threw (ignored)', stopErr);
+        }
+        const regranted = await requestPermission();
+        if (!regranted) {
+          throw startErr instanceof Error ? startErr : new Error(String(startErr));
+        }
+        await native.startCapture(NATIVE_TICK_INTERVAL_MS);
+      }
 
       riskHistoryRef.current = [];
       dynamicIntervalMsRef.current = RISK_INTERVAL_LOW_MS;
