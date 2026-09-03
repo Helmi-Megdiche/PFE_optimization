@@ -136,7 +136,7 @@ Requirements are grouped by capability. Each has a stable ID (`FR-<area>-<n>`), 
 | FR-CAP-4 | The app SHALL trigger an immediate capture on app-switch and a follow-up capture ~5 s later, subject to a 5 s debounce. | M | T (`appSwitchCapture`) |
 | FR-CAP-5 | The periodic interval SHALL be adjusted by foreground app category (browsers/social ≤ 15 s; games/launchers app-switch-only; education ≥ 120 s). | S | T (`appCapturePolicy`) |
 | FR-CAP-6 | The captured JPEG SHALL be deleted from device storage immediately after processing. | M | I |
-| FR-CAP-7 | The pipeline SHALL self-recover from a hung frame (processing watchdog, OCR-lock takeover after 8 s, wedged foreground-lookup skip after 2.5 s). | M | I |
+| FR-CAP-7 | The pipeline SHALL self-recover from a hung frame: in-frame processing watchdog (25 s, foreground) and OCR-lock takeover (8 s), plus native-tick backstops that also work while backgrounded — 60 s tick-liveness force-release and D1 per-phase deadlines (`foreground_lookup` 10 s, `api_post` 20 s) — and a wedged foreground-lookup skip (2.5 s). A superseded frame's late `finally` SHALL NOT corrupt the active frame (generation guard, D3). | M | I |
 
 ### 4.2 Foreground attribution (FR-FG)
 
@@ -270,7 +270,7 @@ Requirements are grouped by capability. Each has a stable ID (`FR-<area>-<n>`), 
 
 | ID | Requirement |
 |----|-------------|
-| NFR-REL-1 | A hung native/API call SHALL NOT permanently stall capture (watchdog + generation token + self-heal). |
+| NFR-REL-1 | A hung native/API call SHALL NOT permanently stall capture (in-frame watchdog + generation token + self-heal + native 5 s-tick liveness/per-phase backstops). Backgrounded recovery requires the screen to be on — MIUI freezes the RN JS thread on screen-off, so a locked-phone wedge is recovered on screen wake. |
 | NFR-REL-2 | The backend SHALL be idempotent on daily score upsert (`UNIQUE (child_id, score_date)`). |
 | NFR-REL-3 | Duplicate mission overlays SHALL be prevented by the debounce/grace guards. |
 

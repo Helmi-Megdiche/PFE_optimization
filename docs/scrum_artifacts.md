@@ -200,7 +200,7 @@ Velocity was measured qualitatively (epics/features per sprint) rather than in s
 | R1 | RN 0.74 incompatibility with heavy TFLite libs | Blocked vision | Switched to Yahoo Open NSFW TFLite + ML Kit (`1c566cb`, `9d17a75`) |
 | R2 | ML Kit weak on Arabic | Missed detections | Added Tesseract `ara` fallback with gating (`1e197c6`) |
 | R3 | MIUI foreground mis-attribution | Wrong app / missed overlays | UsageStats tuning + OCR override (`cddf628`, `59da85b`) |
-| R4 | Background JS timers frozen → wedged lookups | Capture stall | Self-heal + watchdog + generation token (`f40aab5`) |
+| R4 | Background JS timers frozen → wedged lookups / hung frames | Capture stall (silent) | Self-heal + generation token (`f40aab5`); native 5 s-tick liveness backstop (A3c-2c) + D1 per-phase deadlines + D3 `finally` guard. Residual: screen-off freezes the JS thread, recovery on screen wake. |
 | R5 | Mission spam / bypass | Poor UX / weak enforcement | Cooldown + resurface + grace guards |
 | R6 | False positives on filtered SERP / inbox | Wrong missions | Context correctors (SERP cap, benign, launcher) |
 | R7 | OneDrive/Gradle file locks on Windows | Build failures | Exclude build dirs from sync; clean `.gradle` |
@@ -212,7 +212,7 @@ Velocity was measured qualitatively (epics/features per sprint) rather than in s
 **What went well**
 
 - On-device-first architecture held from Sprint 1 to final; the privacy invariant was never compromised.
-- Pure, testable domain logic enabled 310 tests and confident refactors.
+- Pure, testable domain logic enabled 459 tests and confident refactors.
 - Real-device, log-driven debugging (Metro + backend logs) caught subtle production issues (MIUI, frozen timers) that unit tests could not.
 
 **What was hard**

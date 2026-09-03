@@ -397,7 +397,7 @@ Production notes: build with `npm run build` and serve `dist/`; set `NODE_ENV=pr
 |---------|----------|
 | **Privacy** | On-device AI; metadata-only API; images never persisted server-side; debug endpoints dev-only |
 | **Security** | JWT gate on `/api/*`; Helmet + CORS; Joi validation; env-provided secrets |
-| **Reliability** | Processing watchdog, OCR-lock takeover, foreground self-heal, generation token; idempotent score upsert |
+| **Reliability** | Layered wedged-frame recovery from one native 5 s tick — 60 s tick-liveness backstop (A3c-2c), per-phase deadlines (D1: `foreground_lookup` 10 s / `api_post` 20 s), generation-guarded `finally` (D3); plus in-frame processing watchdog + OCR-lock takeover (foreground) and foreground-lookup self-heal; idempotent score upsert. Screen-off freezes the RN JS thread, so JS-side backstops recover a locked-phone wedge only on screen wake. |
 | **Observability** | Structured JSON logs (backend), Metro `[ScreenCapture]` logs (mobile) |
 | **Performance** | Adaptive capture, 25 s vision budget, 5 s debounce, Arabic Tesseract gating |
 | **Config** | `backend/.env` (env), `MobileApp/src/config/apiConfig.ts` (LAN host) |
@@ -415,7 +415,7 @@ Condensed decision log; rationale expanded in [PREFINAL_REPORT.md](PREFINAL_REPO
 | ADR-2 | Yahoo Open NSFW TFLite over custom EfficientNet | RN 0.74 compatibility + stability | Binary-ish adult signal; training pipeline archived |
 | ADR-3 | ML Kit first, Tesseract `ara` fallback | Speed on Latin, coverage on Arabic | Sequential pipeline; up to 25 s on Arabic frames |
 | ADR-4 | OCR (30%) + vision (70%) weighting | Thumbnails/UI text carry strong signals | Keyword-heavy events; context correctors needed |
-| ADR-5 | Adaptive + app-aware capture | Battery vs responsiveness | Native 20 s loop remains as background driver |
+| ADR-5 | Adaptive + app-aware capture | Battery vs responsiveness | One native 5 s tick emits; JS subsamples to the effective interval and carries the wedged-frame backstops (the earlier dual native-loop + JS-timer model is retired) |
 | ADR-6 | Overlay-before-pause presentation | MIUI mis-attribution fix | Requires SYSTEM_ALERT_WINDOW; notification fallback |
 | ADR-7 | Cooldown + resurface (no spam) | Prevent bypass by completing then returning | More complex mission state machine |
 | ADR-8 | Web dashboard, not native parent app | PFE iteration speed | Web-only parent experience; polling not push |

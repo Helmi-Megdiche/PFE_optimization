@@ -3,7 +3,7 @@
 **Author:** Helmi Megdiche — ESPRIT (5th-year PFE)
 **Repository:** [github.com/Helmi-Megdiche/PFE](https://github.com/Helmi-Megdiche/PFE)
 **Document version:** 1.0 (final)
-**Verified totals (final):** **310 automated tests** — **181 mobile** (23 suites) + **129 backend** (17 suites), all passing.
+**Verified totals (final):** **459 automated tests** — **330 mobile** (26 suites) + **129 backend** (17 suites), all passing. (Mobile grew from 181 with the capture-pipeline hardening work: coordinator logic, window-event filter, adaptive-capture / liveness-backstop / per-phase-deadline reducers.)
 
 ---
 
@@ -40,11 +40,11 @@ Out of scope for automation in v1.0-final: on-device UI end-to-end (no Detox/App
 graph TB
     M[Manual device tests<br/>MediaProjection, overlay, MIUI, models] --- top
     I[Integration / smoke scripts<br/>API flows against running server + DB]
-    U[Unit tests — 310<br/>pure logic, contracts, validators]
+    U[Unit tests — 459<br/>pure logic, contracts, validators]
     U --> I --> M
 ```
 
-- **Wide unit base (310 tests):** fast (< 10 s per suite), no device, no network. This is the primary regression safety net.
+- **Wide unit base (459 tests):** fast (< 10 s per suite), no device, no network. This is the primary regression safety net.
 - **Thin integration layer:** PowerShell/TS smoke scripts exercise real HTTP + PostgreSQL for end-to-end confidence.
 - **Manual apex:** documented, repeatable device checklists for anything that cannot be faked (permissions, overlays, camera of the screen, OEM quirks).
 
@@ -71,13 +71,16 @@ Environments:
 
 ## 4. Unit Tests — Mobile
 
-`MobileApp/__tests__/` — **23 suites, 181 tests**.
+`MobileApp/__tests__/` — **26 suites, 330 tests**.
 
 | Suite | Area under test |
 |-------|-----------------|
-| `adaptiveCapture.test.ts` | Risk-tier interval selection (10/15/20 s), HIGH ≤ MEDIUM ≤ LOW invariant |
+| `adaptiveCapture.test.ts` | Risk-tier interval selection (10/15/20 s) + HIGH ≤ MEDIUM ≤ LOW invariant; native-tick subsample gate (5 s tick realizes every target exactly); `shouldForceReleaseProcessingLock` (60 s liveness backstop) and `shouldForceReleasePhase` (D1 per-phase deadlines, anti-stale guard, `vision`-never-fires regression guard); `decideTickAction` composition (absolute 60 s beats phase timeout beats subsample; D3 invariant guards — real start stamp still force-releases, zeroed stamp does not); `decideScrollSettle` (A3c-3 tick-driven scroll settle) |
+| `captureCoordinator.test.ts` | `createCaptureCoordinator` pure factory — request debounce (5 s) + follow-up gap, mission-pause / keyboard-suppression gating, priority coalescing of one pending reason, `isForceCaptureReason` / `isKeyboardSuppressibleReason` exhaustive over all `CaptureReason` members, owed-force debt (A3d) and native-rejection (`onNativeRejected`) handling |
+| `windowEventFilter.test.ts` | `createWindowEventFilter` — rejects `OWN_PACKAGE` → `IME` → `SAME_PACKAGE` → `LAUNCHER_SETTLING` in order; launcher↔quicksearch flap collapses to one capture |
 | `appCapturePolicy.test.ts` | App-category interval caps (browser/social ≤ 15 s, game/system 0, education ≥ 120 s) |
 | `appSwitchCapture.test.ts` | Immediate + follow-up capture on app switch, debounce |
+| `tttTurn.test.ts` | Tic-tac-toe turn/desync guard |
 | `riskCombination.test.ts` | `OCR×0.3 + vision×0.7`, category floors, explicit OCR boost |
 | `riskMapping.test.ts` | ML Kit label → category weight mapping |
 | `nsfwClassifier.test.ts` | TFLite score interpretation / proxy behaviour |
@@ -154,7 +157,10 @@ These require a physical Android device and cannot be automated in v1.0-final. S
 | 1 | Launch app, toggle monitoring | MediaProjection consent dialog appears |
 | 2 | Accept consent | Persistent foreground-service notification shows; captures begin |
 | 3 | Open Chrome with visible text, wait ~20 s | Backend logs `POST /api/screen-events`; event stored |
-| 4 | Revoke MediaProjection | Capture stops cleanly (no crash) |
+| 4 | Revoke MediaProjection | Capture stops cleanly (no crash); `onMonitoringRevoked` red card, toggle snaps off |
+| 5 | Idle the projection token 5 min, then toggle ON | One `E_STALE_PROJECTION` then `startCapture SUCCESS` (one-shot retry); no red LogBox |
+| 6 | Wedged-frame recovery: background SafeGuard **with the screen on**, force/observe a hung frame | `Processing lock force-released … cause: 'tick-liveness'` (`elapsed ≈ 60000`) or `cause: 'tick-phase-timeout:<phase>'`; monitoring resumes |
+| 7 | Same, but **screen off** (locked phone) | JS thread frozen — recovery fires only on screen wake (`elapsed` ≫ 60 s). Documented limitation, not a bug. |
 
 ### 7.2 Foreground attribution (MIUI focus)
 
@@ -206,7 +212,7 @@ These require a physical Android device and cannot be automated in v1.0-final. S
 |-----------|--------|-----------|
 | Privacy | Inspect network payloads; confirm no image bytes leave device on production path | Only text preview (≤ 500) + scores |
 | Performance | Metro `[NSFW] TFLite` and pipeline timings; ensure < 25 s budget | English frames fast; Arabic within budget |
-| Reliability | Force hung frame; observe watchdog / OCR-lock takeover / foreground self-heal | Pipeline recovers, no permanent stall |
+| Reliability | Force hung frame; observe in-frame watchdog (foreground) and the native-tick backstops — 60 s tick-liveness, D1 per-phase deadlines, D3 generation-guarded `finally` (backgrounded) | Pipeline recovers, no permanent stall (screen-on when backgrounded) |
 | Security | Call protected route without JWT | 401; `/dev` and `/debug` absent in production |
 | Battery | Extended monitoring session | Adaptive intervals reduce capture on low-risk screens |
 
@@ -220,6 +226,8 @@ These require a physical Android device and cannot be automated in v1.0-final. S
 
 - No automated UI E2E (Detox/Appium not integrated).
 - Native Java modules (`ScreenCaptureModule`, `ForegroundAppModule`, overlay) rely on manual validation.
+- `useScreenshotCapture` has **no hook test harness** — its event-reaction logic (native-rejection handling, tick subsample wiring, monitoring-revoke handling, and the D3 `finally` guard) is covered by extracted pure reducers (`decideTickAction`, coordinator factory) plus device smoke, not by unit tests of the hook itself.
+- JS-side wedged-frame backstops (tick-liveness, per-phase deadlines) recover a frame that hangs while the phone is **locked** only when the screen wakes — MIUI freezes the RN JS thread on screen-off despite the foreground service. A screen-off native recovery is future work.
 - Backend DB-integration assertions depend on seed state; smoke scripts are not hermetic.
 - On-device model numerics differ from server debug (nsfwjs/Tesseract) — debug scores are **not** production scores.
 - No load/soak testing; single-node assumptions untested at scale.
@@ -260,7 +268,7 @@ npm run smoke:sprint58
 npm run test:sprint59
 ```
 
-**Expected result at final:** mobile `181 passed / 23 suites`, backend `129 passed / 17 suites` (total **310**).
+**Expected result at final:** mobile `330 passed / 26 suites`, backend `129 passed / 17 suites` (total **459**).
 
 ---
 

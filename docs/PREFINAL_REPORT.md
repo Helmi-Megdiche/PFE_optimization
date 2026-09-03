@@ -57,7 +57,7 @@ By commit `59da85b`, the project delivers an end-to-end demonstrable pipeline:
 3. Combined risk scoring with Yahoo Open NSFW TFLite and ML Kit label heuristics.
 4. Automatic mission generation with cooldown resurface, overlay presentation on third-party apps, and parent approval workflow.
 5. Daily cron scoring with dynamic wellbeing proxies (physical activity, bedtime variance, family interaction).
-6. **310 automated unit tests** (181 mobile + 129 backend) plus smoke scripts for integration validation.
+6. **459 automated unit tests** (330 mobile + 129 backend) plus smoke scripts for integration validation.
 
 The final capture/mission commit (`59da85b`) specifically addresses production-blocking bugs discovered during physical-device testing on MIUI: capture pipeline stalls after risky detections, mission overlays appearing only inside SafeGuard instead of on Messenger/Chrome, and cooldown behaviour that blocked overlays without re-presenting completed missions.
 
@@ -224,8 +224,8 @@ const FRAME_PROCESSING_WATCHDOG_MS = 25_000;
 **Why this approach**
 
 - **Battery vs. responsiveness trade-off:** fixed-interval capture wastes power on low-risk home screens and reacts too slowly after a risky browser session. Adaptive + app-aware scheduling concentrates captures where risk is statistically higher.
-- **Platform constraint:** MediaProjection requires a visible foreground service on Android 14+; the native 60s loop remains as a safety net while JS timers implement smarter scheduling.
-- **Post-mission stability (v1.0-final):** overlay is shown **before** capture pauses (`presentMissionFromCapture.ts`) so MIUI does not attribute frames to SafeGuard; a 25s processing watchdog and generation token prevent `isProcessing` from blocking the pipeline indefinitely after hung native/API calls.
+- **Platform constraint:** MediaProjection requires a visible foreground service on Android 14+. A single native `Handler.postDelayed` loop ticks every 5s and emits `onNativePeriodicTick`; JS subsamples it to the effective adaptive interval (the earlier separate JS `setTimeout` scheduling loop is retired).
+- **Post-mission / wedged-frame stability:** overlay is shown **before** capture pauses (`presentMissionFromCapture.ts`) so MIUI does not attribute frames to SafeGuard. A hung frame is recovered by the in-frame 25s watchdog + OCR-lock takeover (foreground) and, crucially, by native-tick backstops that also run backgrounded — a 60s tick-liveness force-release (A3c-2c) and D1 per-phase deadlines (`foreground_lookup` 10s, `api_post` 20s; `vision` rides the 60s). The generation token makes a superseded frame's late `finally` a no-op; D3 moved the `finally`'s start-timestamp reset inside that guard so a stale frame can no longer disable the 60s backstop for the active frame. Screen-off freezes the RN JS thread, so a locked-phone wedge is recovered on screen wake.
 
 **Limitations**
 
@@ -559,7 +559,7 @@ Authentication uses `fetchWithAuth` with parent JWT stored in `localStorage`. Ch
 
 | Layer | Framework | Count (v1.0-final) |
 |-------|-----------|---------------------|
-| Mobile unit tests | Jest 29 (`MobileApp/__tests__/`) | **181 tests**, 23 suites |
+| Mobile unit tests | Jest 29 (`MobileApp/__tests__/`) | **330 tests**, 26 suites |
 | Backend unit tests | Jest (`backend/tests/`) | **129 tests**, 17 suites |
 | Combined runner | `scripts/run-all-tests.ps1` | Mobile + backend sequential |
 | Smoke scripts | `smoke-missions.ps1`, `smoke-sprint58.ts`, `test-sprint59.ts` | API integration against running server + seeded DB |
@@ -716,7 +716,7 @@ The SafeGuard platform, as released at **`v1.0-final` (commit `59da85b`)**, impl
 3. **Combined risk scoring** — OCR (30%) + vision (70%) per frame, plus daily addiction/wellbeing scores with exposure penalty and dynamic proxies.
 4. **End-to-end gamification** — Mission generation, overlay enforcement, cognitive games, parent approval, points, badges, levels, and redeemable rewards form a closed behavioural loop.
 5. **Parent visibility** — Web dashboard for monitoring, approvals, interests (guided picker), and rewards.
-6. **Test evidence** — 310 automated unit tests (181 mobile + 129 backend) document behaviour for critical paths.
+6. **Test evidence** — 459 automated unit tests (330 mobile + 129 backend) document behaviour for critical paths.
 
 ### 6.2 Requirements coverage
 
@@ -742,7 +742,7 @@ For jury evaluation, SafeGuard should be positioned as a **strong research proto
 
 | Suite | Location | Result (5 June 2026) |
 |-------|----------|----------------------|
-| MobileApp Jest | `MobileApp/__tests__/` | 23 suites, **181 passed** |
+| MobileApp Jest | `MobileApp/__tests__/` | 26 suites, **330 passed** |
 | Backend Jest | `backend/tests/` | 17 suites, **129 passed** |
 | Sprint 5.8 smoke | `backend/scripts/smoke-sprint58.ts` | 34/34 checks |
 | Mission smoke | `backend/scripts/smoke-missions.ps1` | PowerShell API flow |
