@@ -27,13 +27,13 @@ npm run dev            # tsx watch src/index.ts (hot reload)
 npm run build          # tsc -> dist/
 npm start              # node dist/index.js
 npm run db:up          # docker compose up -d (Postgres on host :5433 → container 5432)
-npm run db:migrate     # tsx src/db/migrate.ts (runs src/db/migrations/*.sql in order)
+npm run db:migrate     # tsx src/db/migrate.ts (ledger-tracked; safe to re-run any number of times)
 npm run db:setup       # db:up + db:migrate
 npm test               # jest (ts-jest, tests live in backend/tests/**.test.ts)
 npm run test:watch
 npx jest tests/scoringEngine.test.ts   # run one test file
 ```
-`docker-compose.yml` maps host port **5433**→5432 specifically to avoid the local PostgreSQL 18 service on 5432; `.env.example` already points `DATABASE_URL` at 5433, so `npm run db:setup` works without stopping that service. `db/migrate.ts` re-runs **every** migration each time and relies on `IF NOT EXISTS` — a few (e.g. `011_quiz_questions.sql`) are **not** idempotent, so migrating against a DB that already has the schema errors. On a stale Docker volume, reset with `cd backend && docker compose down -v && docker compose up -d` then `npm run db:migrate`. See `backend/DATABASE.md` for more.
+`docker-compose.yml` maps host port **5433**→5432 specifically to avoid the local PostgreSQL 18 service on 5432; `.env.example` already points `DATABASE_URL` at 5433, so `npm run db:setup` works without stopping that service. `db/migrate.ts` keeps a **`schema_migrations` ledger** (created by the runner itself): each file runs once, inside its own transaction together with its ledger insert (fail → rollback → no row, no partial schema), and re-running is a safe no-op. Decision logic is the pure, DB-free `src/db/migrationPlan.ts` (tested by `tests/migrationPlan.test.ts`). Editing an already-applied file is detected by **checksum** and **refused** (exit 1), not silently re-run. A pre-ledger DB already at head (e.g. Helmi's demo DB) is auto-detected via landmark probes and **baselined** — every file stamped as applied, nothing executed. A *partially* migrated pre-ledger DB aborts with an actionable message; the operator picks up with `MIGRATE_BASELINE_UPTO=<file> npm run db:migrate` (stamp ≤ that file, run the rest). `docker compose down -v` is **no longer** a routine recovery path — only for deliberately discarding a database. See `backend/DATABASE.md` for more.
 
 ### MobileApp/
 ```powershell
@@ -69,7 +69,7 @@ Entry: `src/index.ts` → `createApp()` (`src/app.ts`) → `src/routes/index.ts`
 - **Scoring** (`src/scoring/`): pure functions. `scoringEngine.ts` computes an **addiction risk score** (higher = worse; weighted intensity/compulsivity/night-usage/escalation/real-imbalance) and a **well-being score** (higher = better). `aggregateUsage.ts` turns raw `usage_sessions` rows into the daily stats those functions consume; `wellbeingProxies.ts` fetches DB-backed inputs (physical activity, bedtime variance, family interaction). Keep scoring functions pure and covered by `tests/scoringEngine.test.ts` / `wellbeingProxies.test.ts`.
 - **Cron** (`src/jobs/dailyScoreJob.ts`): scheduled on server start (`node-cron`). Per child per day, aggregates sessions → computes both scores → writes `daily_scores` → may generate a mission from high addiction / low well-being.
 - **Missions** (`src/services/`): `missionGenerator` (rule-based generation), `missionCompletion`, `gamificationService` (points/badges), `quizService`, `customMissionService`. Mission "risk cooldown" is now "a pending risky mission exists" — see `hasRecentRiskyMission`, not the legacy env var.
-- **DB**: plain SQL migrations in `src/db/migrations/NNN_*.sql`, applied in filename order by `db/migrate.ts`. `db/pool.ts` exports the `pg` pool + `query`. No ORM. Add schema changes as a new numbered migration; never edit an applied one.
+- **DB**: plain SQL migrations in `src/db/migrations/NNN_*.sql`, applied in filename order by `db/migrate.ts` and tracked in the `schema_migrations` ledger. `db/pool.ts` exports the `pg` pool + `query`. No ORM. Add schema changes as a **new numbered file** (zero-padded 3 digits) — never edit an applied one; the ledger now **enforces** this by checksum (a changed applied file aborts the run). Each file runs inside a transaction, so `CREATE INDEX CONCURRENTLY` / `ALTER TYPE … ADD VALUE` won't work in a migration.
 
 ## Mobile architecture
 

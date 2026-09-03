@@ -126,9 +126,7 @@ cd backend
 npm run db:migrate
 ```
 
-The runner (`src/db/migrate.ts`) applies the SQL files in `src/db/migrations/` in lexical order. DDL is written with `IF NOT EXISTS` guards, so re-running is largely idempotent.
-
-> **Known limitation:** the runner applies **all** files; on a pre-existing database, verify state before running. There is no `004` (numbering skips it). See [architecture.md](architecture.md) §5.2 for the full migration inventory.
+The runner (`src/db/migrate.ts`) applies the SQL files in `src/db/migrations/` in lexical order, each in its own transaction, and records every applied file in a `schema_migrations` ledger it creates itself. Re-running is a safe no-op; a failed migration rolls back with no ledger row; editing an already-applied file is refused by checksum. A pre-existing database with no ledger is auto-detected — stamped without executing if it is already at head, otherwise the run aborts with a `MIGRATE_BASELINE_UPTO=<file>` resume hint. There is no `004` (numbering skips it); this is expected. See [architecture.md](architecture.md) §5.2 for the full migration inventory and `backend/DATABASE.md` for the ledger details.
 
 ### 4.3 Seed data
 

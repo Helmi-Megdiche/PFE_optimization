@@ -419,7 +419,7 @@ Condensed decision log; rationale expanded in [PREFINAL_REPORT.md](PREFINAL_REPO
 | ADR-6 | Overlay-before-pause presentation | MIUI mis-attribution fix | Requires SYSTEM_ALERT_WINDOW; notification fallback |
 | ADR-7 | Cooldown + resurface (no spam) | Prevent bypass by completing then returning | More complex mission state machine |
 | ADR-8 | Web dashboard, not native parent app | PFE iteration speed | Web-only parent experience; polling not push |
-| ADR-9 | Sequential SQL migrations | Simplicity, reviewability | Runner re-runs all files (idempotent DDL) |
+| ADR-9 | Sequential SQL migrations + `schema_migrations` ledger | Simplicity, reviewability | Runner applies each file once in its own transaction; re-run is a no-op, applied-file edits refused by checksum, pre-ledger DBs auto-baselined |
 | ADR-10 | JWT dev tokens | Sufficient for demo | Production needs real auth + per-route ownership |
 
 ---
