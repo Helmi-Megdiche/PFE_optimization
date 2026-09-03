@@ -85,7 +85,9 @@ import {
   type NativeRejectionReason,
 } from '../capture/captureCoordinator';
 import { createWindowEventFilter, isImePackage } from '../capture/windowEventFilter';
+import { createA11yHealthTracker, type A11yHealth } from '../capture/a11yHealth';
 import { useAccessibilityEvents } from './useAccessibilityEvents';
+import { isAccessibilityServiceEnabled } from '../native/SafeGuardAccessibility';
 import type {
   AccessibilityKeyboardChangedEvent,
   AccessibilityScrollEvent,
@@ -182,6 +184,8 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
   const [dynamicIntervalMs, setDynamicIntervalMs] = useState(RISK_INTERVAL_LOW_MS);
   const [appCategory, setAppCategory] = useState<AppCategory | null>(null);
   const [avgRiskScore, setAvgRiskScore] = useState<number | null>(null);
+  /** Evidence-based accessibility-service health for the Monitor card (observability only). */
+  const [a11yHealth, setA11yHealth] = useState<A11yHealth>('off');
 
   const isProcessingRef = useRef(false);
   const processingStartTimeRef = useRef(0);
@@ -232,6 +236,17 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
   const lastA11yWindowEventAtMs = useRef(0);
   /** Last keyboard visibility we pushed to the coordinator — lets us detect a stuck latch. */
   const a11yKeyboardVisibleRef = useRef(false);
+  /**
+   * Evidence-based health of the accessibility feed: a poll-observed app switch
+   * the window feed did not deliver flips this to `degraded`. Observability only —
+   * `A11Y_STALE_MS` / `a11yDriving` and every capture decision are unaffected.
+   */
+  const a11yHealthRef = useRef(
+    createA11yHealthTracker({ now: () => Date.now() }),
+  );
+  const syncA11yHealth = useCallback(() => {
+    setA11yHealth(a11yHealthRef.current.getHealth());
+  }, []);
 
   const coordinatorRef = useRef<CaptureCoordinator | null>(null);
   if (!coordinatorRef.current) {
@@ -400,6 +415,8 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
   const handleA11yWindowChanged = useCallback(
     (event: AccessibilityWindowChangedEvent) => {
       lastA11yWindowEventAtMs.current = Date.now();
+      a11yHealthRef.current.onWindowEvent();
+      syncA11yHealth();
       if (!a11yConnectedRef.current) {
         return;
       }
@@ -445,7 +462,7 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
       void triggerAppSwitchCapture(reason);
       refreshIntervalForApp();
     },
-    [triggerAppSwitchCapture, refreshIntervalForApp],
+    [triggerAppSwitchCapture, refreshIntervalForApp, syncA11yHealth],
   );
 
   /**
@@ -496,6 +513,8 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
   useEffect(() => {
     const wasConnected = a11yConnectedRef.current;
     a11yConnectedRef.current = a11yConnected;
+    a11yHealthRef.current.setEnabled(a11yConnected);
+    syncA11yHealth();
     if (wasConnected && !a11yConnected) {
       // Service disconnected/unbound/crashed. If the keyboard was open, no
       // visible:false will ever arrive — clear the latch so routine captures
@@ -504,7 +523,7 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
       a11yKeyboardVisibleRef.current = false;
       scLog('a11y disconnected — keyboard suppression latch cleared');
     }
-  }, [a11yConnected]);
+  }, [a11yConnected, syncA11yHealth]);
 
   /**
    * Force-release a wedged processing lock (any never-settling `await` in
@@ -1178,6 +1197,10 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
     clearAdaptiveTimers();
 
     appPollTimerRef.current = setInterval(() => {
+      // First thing, outside the async body: a tick gap wider than a frozen JS
+      // thread means the a11y liveness clock is stale from the freeze, not from a
+      // silent service. Re-seed it so the post-freeze tick is not a false miss.
+      a11yHealthRef.current.onPollTick();
       void (async () => {
         const fg = await withTimeout(
           resolveForegroundApp(),
@@ -1230,6 +1253,22 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
           a11yConnectedRef.current &&
           Date.now() - lastA11yWindowEventAtMs.current < A11Y_STALE_MS;
 
+        // Observability only (does not gate any capture): if the poll saw a real
+        // app switch the a11y window feed did not deliver within the grace
+        // window, the service is bound-but-silent (or unbound) — surface it.
+        if (
+          (launcherReturn || appChanged) &&
+          a11yHealthRef.current.onPollObservedSwitch()
+        ) {
+          scLog('a11y.health.degraded', { from: previousPkg, to: pkg });
+          syncA11yHealth();
+          // Distinguish "unbound" from "bound but silent" — one bridge call per proven miss.
+          void isAccessibilityServiceEnabled().then((v) => {
+            a11yHealthRef.current.setEnabled(v);
+            syncA11yHealth();
+          });
+        }
+
         if (launcherReturn) {
           visitedLauncherRef.current = false;
           if (a11yDriving) {
@@ -1281,7 +1320,12 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
 
     refreshIntervalForApp();
     scLog('Smart capture timers started (adaptive)');
-  }, [clearAdaptiveTimers, refreshIntervalForApp, triggerAppSwitchCapture]);
+  }, [
+    clearAdaptiveTimers,
+    refreshIntervalForApp,
+    triggerAppSwitchCapture,
+    syncA11yHealth,
+  ]);
 
   const startMonitoring = useCallback(async (): Promise<boolean> => {
     if (Platform.OS !== 'android') {
@@ -1350,6 +1394,8 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
       setAvgRiskScore(null);
       coordinatorRef.current!.reset();
       windowEventFilterRef.current.reset();
+      a11yHealthRef.current.reset();
+      syncA11yHealth();
       scrollSettleStateRef.current = initialScrollSettleState();
       // Seed liveness now so a quiet first minute is not treated as a stale a11y path.
       lastA11yWindowEventAtMs.current = Date.now();
@@ -1376,7 +1422,13 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
     } finally {
       isStartingRef.current = false;
     }
-  }, [intervalMs, refreshUsageAccess, requestPermission, refreshForegroundCache]);
+  }, [
+    intervalMs,
+    refreshUsageAccess,
+    requestPermission,
+    refreshForegroundCache,
+    syncA11yHealth,
+  ]);
 
   const stopMonitoring = useCallback(async (): Promise<void> => {
     if (Platform.OS !== 'android') {
@@ -1389,6 +1441,8 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
     resetForegroundLookup();
     coordinatorRef.current!.reset();
     windowEventFilterRef.current.reset();
+    a11yHealthRef.current.reset();
+    syncA11yHealth();
     scrollSettleStateRef.current = initialScrollSettleState();
     // Force-clear the keyboard latch: if the service died with the keyboard open no
     // visible:false will arrive to clear it.
@@ -1404,7 +1458,7 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
     setIsPaused(false);
     setPermissionGranted(false);
     riskHistoryRef.current = [];
-  }, [clearAdaptiveTimers]);
+  }, [clearAdaptiveTimers, syncA11yHealth]);
 
   const pauseCapture = useCallback(async () => {
     if (Platform.OS !== 'android' || !isMonitoring) {
@@ -1471,6 +1525,8 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
     coordinatorRef.current!.reset();
     coordinatorRef.current!.setKeyboardVisible(false);
     windowEventFilterRef.current.reset();
+    a11yHealthRef.current.reset();
+    syncA11yHealth();
     scrollSettleStateRef.current = initialScrollSettleState();
     a11yKeyboardVisibleRef.current = false;
     riskHistoryRef.current = [];
@@ -1481,7 +1537,7 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
       'Screen monitoring stopped: the system revoked screen-capture permission. ' +
         'Turn monitoring back on to resume.',
     );
-  }, [clearAdaptiveTimers]);
+  }, [clearAdaptiveTimers, syncA11yHealth]);
 
   useEffect(() => {
     if (Platform.OS !== 'android') {
@@ -1712,6 +1768,7 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
     avgRiskScore,
     lastError,
     lastCaptureAt,
+    a11yHealth,
     requestPermission,
     refreshUsageAccess,
     openUsageAccessSettings,

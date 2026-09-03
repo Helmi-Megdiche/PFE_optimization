@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   Alert,
-  AppState,
   Platform,
   StyleSheet,
   Switch,
@@ -9,10 +8,7 @@ import {
   View,
 } from 'react-native';
 import { useScreenshotCapture } from '../hooks/useScreenshotCapture';
-import {
-  isAccessibilityServiceEnabled,
-  openAccessibilitySettings,
-} from '../native/SafeGuardAccessibility';
+import { openAccessibilitySettings } from '../native/SafeGuardAccessibility';
 import getScreenCaptureModule from '../native/ScreenCapture';
 import { scLog, scWarn } from '../utils/screenCaptureLogger';
 import { getMonitoringIntent, setMonitoringIntent } from '../utils/monitoringIntent';
@@ -52,28 +48,10 @@ export function ScreenMonitor({
   const [enabled, setEnabled] = useState(false);
   const [isBusy, setIsBusy] = useState(false);
   const [lastResult, setLastResult] = useState<CaptureCycleResult | null>(null);
-  const [a11yEnabled, setA11yEnabled] = useState(false);
 
-  // The accessibility event stream is now mounted inside useScreenshotCapture (it
-  // drives app-switch captures + keyboard suppression). This screen keeps only its
-  // own connected-state check for the "Accessibility service" card below.
-  useEffect(() => {
-    if (Platform.OS !== 'android') {
-      return undefined;
-    }
-    const refresh = () => {
-      void isAccessibilityServiceEnabled().then(setA11yEnabled);
-    };
-    refresh();
-    const sub = AppState.addEventListener('change', (next) => {
-      if (next === 'active') {
-        refresh();
-      }
-    });
-    return () => {
-      sub.remove();
-    };
-  }, []);
+  // Accessibility health is owned by useScreenshotCapture (`a11yHealth`) — it has
+  // the poll evidence needed to tell "bound and live" from "bound but silent".
+  // One source of truth, not a second isEnabled() check here that could disagree.
 
   const onCycleComplete = useCallback((result: CaptureCycleResult) => {
     setLastResult(result);
@@ -90,6 +68,7 @@ export function ScreenMonitor({
     avgRiskScore,
     lastError,
     lastCaptureAt,
+    a11yHealth,
     refreshUsageAccess,
     openUsageAccessSettings,
     startMonitoring,
@@ -296,11 +275,29 @@ export function ScreenMonitor({
         <View style={styles.kvRow}>
           <View style={styles.kvLeft}>
             <AppText variant="bodyStrong">Accessibility service</AppText>
-            <AppText variant="meta">Faster app + website detection</AppText>
+            <AppText variant="meta">
+              {a11yHealth === 'degraded'
+                ? 'Turn SafeGuard off and back on in Accessibility settings'
+                : a11yHealth === 'unverified'
+                ? "Switch apps once to confirm it's live"
+                : 'Faster app + website detection'}
+            </AppText>
           </View>
           <View style={styles.kvRight}>
-            {a11yEnabled ? (
-              <Pill label="Granted" tone="sage" />
+            {a11yHealth === 'live' ? (
+              <Pill label="Active" tone="sage" />
+            ) : a11yHealth === 'unverified' ? (
+              <Pill label="Enabled" tone="neutral" />
+            ) : a11yHealth === 'degraded' ? (
+              <View style={styles.a11yDegradedRow}>
+                <Pill label="Not responding" tone="amber" />
+                <Button
+                  label="Open settings"
+                  variant="secondary"
+                  style={styles.smallBtn}
+                  onPress={() => void openAccessibilitySettings()}
+                />
+              </View>
             ) : (
               <Button
                 label="Enable"
@@ -402,6 +399,7 @@ const styles = StyleSheet.create({
   kvRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.md },
   kvLeft: { flex: 1, gap: 2 },
   kvRight: { flexShrink: 0 },
+  a11yDegradedRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   eventHead: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   previewBox: {
     marginTop: spacing.md,
