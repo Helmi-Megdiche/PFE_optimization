@@ -184,7 +184,7 @@ A backlog item is **Done** when:
 | Dimension | Value at final |
 |-----------|----------------|
 | Major sprints | 6 (plus ~14 interstitial point sprints) |
-| Automated tests | **310** (181 mobile / 129 backend) |
+| Automated tests | **459** (330 mobile / 129 backend) |
 | DB migrations | 15 (`000`–`015`, no `004`) |
 | Smoke/integration scripts | 3 (`smoke-missions`, `smoke-sprint58`, `test-sprint59`) |
 | Tracked epics | 10 (9 Done, 1 future work) |
