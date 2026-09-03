@@ -531,6 +531,43 @@ describe('decideTickAction — phase timeout composition (D1)', () => {
       }),
     ).toBe('emitCapture');
   });
+
+  // D3: invariant guards on the pure contract that the one-line finally fix in
+  // `processCapturedFrame` upholds — a superseded predecessor's late `finally`
+  // must not zero the *active* successor frame's start stamp. `processCapturedFrame`
+  // has no test harness, so these cannot exercise the moved line itself; they
+  // pin the reducer behaviour on either side of it (real stamp -> backstop
+  // fires; zeroed stamp -> backstop silently disabled, the pre-D3 bug).
+  it('D3: the 60s backstop fires for a successor frame carrying its own real start stamp (predecessor superseded, its late finally left this stamp intact)', () => {
+    const successorStart = 50_000;
+    expect(
+      decideTickAction({
+        isProcessing: true,
+        processingStartAtMs: successorStart,
+        nowMs: successorStart + OCR_LOCK_LIVENESS_MS,
+        livenessThresholdMs: OCR_LOCK_LIVENESS_MS,
+        lastPeriodicPassAtMs: Number.NEGATIVE_INFINITY,
+        dynamicIntervalMs: 20_000,
+        phase: 'vision', // vision has no phase deadline — the 60s absolute is its only backstop
+        phaseStartedAtMs: successorStart,
+      }),
+    ).toBe('forceReleaseLock');
+  });
+
+  it('D3: a zeroed start stamp silently disables the 60s backstop (the pre-D3 failure mode: predecessor finally ran `processingStartTimeRef.current = 0` unconditionally)', () => {
+    expect(
+      decideTickAction({
+        isProcessing: true,
+        processingStartAtMs: 0, // stomped by a stale predecessor's finally
+        nowMs: 50_000 + OCR_LOCK_LIVENESS_MS,
+        livenessThresholdMs: OCR_LOCK_LIVENESS_MS,
+        lastPeriodicPassAtMs: 50_000 + OCR_LOCK_LIVENESS_MS, // subsample not due either
+        dynamicIntervalMs: 20_000,
+        phase: 'vision',
+        phaseStartedAtMs: 50_000,
+      }),
+    ).toBe('noop');
+  });
 });
 
 describe('recordScrollEvent', () => {

@@ -1045,13 +1045,17 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
         if (processingHeartbeat !== undefined) {
           clearInterval(processingHeartbeat);
         }
-        processingStartTimeRef.current = 0;
+        // D3: all three resets are generation-guarded. A superseded frame's
+        // `finally` running late (after a force-release / watchdog / OCR-lock
+        // takeover bumped the generation and a newer frame is now active) must
+        // not touch the active frame's lock, start timestamp, or phase. A stray
+        // `processingStartTimeRef.current = 0` here silently disables the 60s
+        // liveness backstop for that active frame (`shouldForceReleaseProcessingLock`
+        // early-returns on `<= 0`), forces a spurious OCR-lock takeover, and
+        // makes its heartbeat self-terminate.
         if (processingGenerationRef.current === generation) {
           isProcessingRef.current = false;
-          // Guarded by generation, deliberately unlike the unconditional
-          // `processingStartTimeRef.current = 0` two lines above (pre-existing;
-          // see D1 report) — a stale frame's `finally` running late must not
-          // stomp the phase of whatever frame is actually active now.
+          processingStartTimeRef.current = 0;
           setPhase('idle');
         }
         const deferredFrame = pendingFrameRef.current;
