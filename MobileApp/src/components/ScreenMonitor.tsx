@@ -289,15 +289,7 @@ export function ScreenMonitor({
             ) : a11yHealth === 'unverified' ? (
               <Pill label="Enabled" tone="neutral" />
             ) : a11yHealth === 'degraded' ? (
-              <View style={styles.a11yDegradedRow}>
-                <Pill label="Not responding" tone="amber" />
-                <Button
-                  label="Open settings"
-                  variant="secondary"
-                  style={styles.smallBtn}
-                  onPress={() => void openAccessibilitySettings()}
-                />
-              </View>
+              <Pill label="Not responding" tone="amber" />
             ) : (
               <Button
                 label="Enable"
@@ -399,7 +391,6 @@ const styles = StyleSheet.create({
   kvRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.md },
   kvLeft: { flex: 1, gap: 2 },
   kvRight: { flexShrink: 0 },
-  a11yDegradedRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   eventHead: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   previewBox: {
     marginTop: spacing.md,
