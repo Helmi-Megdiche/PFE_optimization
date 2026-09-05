@@ -72,7 +72,9 @@ import {
   resolveForegroundAppWithRetry,
 } from '../native/ForegroundApp';
 import {
+  checkMissionCaptureSessionBackstop,
   isMissionCapturePaused,
+  payOwedMissionCaptureResume,
   registerMissionCaptureHandlers,
   resetMissionCaptureSession,
   unregisterMissionCaptureHandlers,
@@ -414,6 +416,8 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
    */
   const handleA11yWindowChanged = useCallback(
     (event: AccessibilityWindowChangedEvent) => {
+      checkMissionCaptureSessionBackstop();
+      payOwedMissionCaptureResume();
       lastA11yWindowEventAtMs.current = Date.now();
       a11yHealthRef.current.onWindowEvent();
       syncA11yHealth();
@@ -1392,6 +1396,7 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
       setDynamicIntervalMs(RISK_INTERVAL_LOW_MS);
       setAppCategory(null);
       setAvgRiskScore(null);
+      resetMissionCaptureSession();
       coordinatorRef.current!.reset();
       windowEventFilterRef.current.reset();
       a11yHealthRef.current.reset();
@@ -1461,7 +1466,7 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
   }, [clearAdaptiveTimers, syncA11yHealth]);
 
   const pauseCapture = useCallback(async () => {
-    if (Platform.OS !== 'android' || !isMonitoring) {
+    if (Platform.OS !== 'android' || !isMonitoringRef.current) {
       return;
     }
     if (isUsableForegroundPackage(lastAppPackageRef.current)) {
@@ -1474,7 +1479,7 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
       scError('pauseCapture failed', err);
       setLastError(err instanceof Error ? err.message : String(err));
     }
-  }, [isMonitoring, clearCaptureTimers]);
+  }, [clearCaptureTimers]);
 
   const resumeCapture = useCallback(async () => {
     if (Platform.OS !== 'android' || !isMonitoringRef.current) {
@@ -1485,7 +1490,7 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
       missionEndedAtRef.current = Date.now();
       // Drop any arm taken before the mission pause — the native tick was
       // stopped while paused, so an untouched arm would settle-fire on the
-      // first tick after resume, duplicating the MISSION_RESUME capture.
+      // first tick after resume, duplicating a capture right after the mission ends.
       scrollSettleStateRef.current = initialScrollSettleState();
       await getScreenCaptureModule().resumeCapture();
       scLog('resumeCapture OK');
@@ -1498,6 +1503,7 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
 
   useEffect(() => {
     registerMissionCaptureHandlers(pauseCapture, resumeCapture);
+    payOwedMissionCaptureResume();
     return () => {
       unregisterMissionCaptureHandlers();
     };
@@ -1522,6 +1528,7 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
     }
     scWarn('MediaProjection revoked by system — monitoring stopped');
     clearAdaptiveTimers();
+    resetMissionCaptureSession();
     coordinatorRef.current!.reset();
     coordinatorRef.current!.setKeyboardVisible(false);
     windowEventFilterRef.current.reset();

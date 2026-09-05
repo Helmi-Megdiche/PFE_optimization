@@ -16,9 +16,13 @@ import {
 } from '../missions/missionNotificationLaunch';
 import { promptOverlayPermissionIfNeeded } from '../native/overlayPermission';
 import { navigateToMissionScreen } from '../navigation/navigationRef';
-import { forceEndMissionCaptureSession } from '../utils/missionCaptureSession';
+import {
+  checkMissionCaptureSessionBackstop,
+  forceEndMissionCaptureSession,
+  payOwedMissionCaptureResume,
+} from '../utils/missionCaptureSession';
 import { ApiHttpError } from '../services/apiClient';
-import { scError, scLog } from '../utils/screenCaptureLogger';
+import { scError, scLog, scWarn } from '../utils/screenCaptureLogger';
 
 function isMissionAlreadyFinishedError(err: unknown): boolean {
   if (err instanceof ApiHttpError && err.status === 409) {
@@ -216,6 +220,8 @@ export function useMissionOverlayListener(): void {
 
     const appStateSub = AppState.addEventListener('change', (next) => {
       if (next === 'active') {
+        checkMissionCaptureSessionBackstop();
+        payOwedMissionCaptureResume();
         void flushPendingOverlayEvents();
         openPending();
       }

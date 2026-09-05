@@ -22,7 +22,6 @@ import { focus } from '../theme';
 import {
   beginMissionCaptureSession,
   forceEndMissionCaptureSession,
-  isMissionCapturePaused,
 } from '../utils/missionCaptureSession';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'MissionScreen'>;
@@ -42,13 +41,11 @@ export function MissionScreen({ navigation, route }: Props): React.JSX.Element {
   }, [navigation]);
 
   useEffect(() => {
-    if (!isMissionCapturePaused()) {
-      beginMissionCaptureSession();
-    }
+    beginMissionCaptureSession(missionId, 'screen');
     return () => {
       forceEndMissionCaptureSession();
     };
-  }, []);
+  }, [missionId]);
 
   // Disable hardware back; child must finish or explicitly quit.
   useEffect(() => {
