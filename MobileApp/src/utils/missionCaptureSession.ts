@@ -34,7 +34,7 @@
  * begin().
  */
 
-import { scLog, scWarn } from './screenCaptureLogger';
+import {scLog, scWarn} from './screenCaptureLogger';
 
 export const MISSION_SESSION_MAX_MS = 10 * 60 * 1000;
 
@@ -86,7 +86,7 @@ export function createMissionCaptureSessionTracker(deps: {
         from: session.source,
         to: source,
       });
-      session = { missionId, source, startedAtMs: deps.now() };
+      session = {missionId, source, startedAtMs: deps.now()};
       return;
     }
 
@@ -100,8 +100,8 @@ export function createMissionCaptureSessionTracker(deps: {
       void pauseCaptureFn?.();
     }
 
-    session = { missionId, source, startedAtMs: deps.now() };
-    scLog('Mission capture session begin', { missionId, source });
+    session = {missionId, source, startedAtMs: deps.now()};
+    scLog('Mission capture session begin', {missionId, source});
   }
 
   function forceEnd(): void {
@@ -145,7 +145,10 @@ export function createMissionCaptureSessionTracker(deps: {
     }
   }
 
-  function registerHandlers(pause: CaptureControl, resume: CaptureControl): void {
+  function registerHandlers(
+    pause: CaptureControl,
+    resume: CaptureControl,
+  ): void {
     pauseCaptureFn = pause;
     resumeCaptureFn = resume;
   }
@@ -167,9 +170,12 @@ export function createMissionCaptureSessionTracker(deps: {
   };
 }
 
-const tracker = createMissionCaptureSessionTracker({ now: () => Date.now() });
+const tracker = createMissionCaptureSessionTracker({now: () => Date.now()});
 
-export function registerMissionCaptureHandlers(pause: CaptureControl, resume: CaptureControl): void {
+export function registerMissionCaptureHandlers(
+  pause: CaptureControl,
+  resume: CaptureControl,
+): void {
   tracker.registerHandlers(pause, resume);
 }
 
@@ -181,7 +187,10 @@ export function isMissionCapturePaused(): boolean {
   return tracker.isPaused();
 }
 
-export function beginMissionCaptureSession(missionId: string, source: MissionCaptureSource): void {
+export function beginMissionCaptureSession(
+  missionId: string,
+  source: MissionCaptureSource,
+): void {
   tracker.begin(missionId, source);
 }
 
