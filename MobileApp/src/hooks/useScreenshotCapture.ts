@@ -11,6 +11,7 @@ import getScreenCaptureModule, {
 import { keywordFilter } from '../utils/keywordFilter';
 import { classifyImage } from '../services/imageClassifier';
 import { extractTextMixed } from '../services/mixedScriptOcr';
+import {resetActiveArabicRecognition} from '../services/mobileArabicOcr';
 import { ApiAuthError } from '../services/apiClient';
 import { postScreenEvent } from '../services/screenEventsApi';
 import { clearStaleNotificationMissionLaunch } from '../missions/missionNotificationLaunch';
@@ -1397,6 +1398,7 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
       setAppCategory(null);
       setAvgRiskScore(null);
       resetMissionCaptureSession();
+      resetActiveArabicRecognition();
       coordinatorRef.current!.reset();
       windowEventFilterRef.current.reset();
       a11yHealthRef.current.reset();
@@ -1441,6 +1443,7 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
     }
     scLog('stopMonitoring()');
     resetMissionCaptureSession();
+    resetActiveArabicRecognition();
     resetMissionPresentationGuard();
     clearAdaptiveTimers();
     resetForegroundLookup();
@@ -1529,6 +1532,7 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
     scWarn('MediaProjection revoked by system — monitoring stopped');
     clearAdaptiveTimers();
     resetMissionCaptureSession();
+    resetActiveArabicRecognition();
     coordinatorRef.current!.reset();
     coordinatorRef.current!.setKeyboardVisible(false);
     windowEventFilterRef.current.reset();
