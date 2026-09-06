@@ -1,0 +1,10 @@
+# Keep committed patch-package patches byte-identical across checkout on this
+# core.autocrlf=true repo. Without this, a fresh clone re-smudges the .patch to
+# CRLF and patch-package fails to re-apply. `-text` (not `binary`) stops EOL
+# conversion while keeping the patch diffable for review.
+#
+# Scoped to patches/**/*.patch — a path that matches nothing that exists today
+# (patches are net-new), so zero working-tree churn. This does NOT pre-empt the
+# deferred repo-wide .gitattributes question (Tier-4 #30), which is about churn
+# across the whole existing tree.
+patches/**/*.patch -text
