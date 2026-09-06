@@ -166,4 +166,31 @@ describe('extractArabicTextOnDevice — wedged-recognition degrade', () => {
     expect(r1).toEqual({text: 'shared-text', confidence: expect.any(Number)});
     expect(r2).toEqual(r1);
   });
+
+  it('a native rejection settles the slot cleanly — no disable, re-armed for the next frame', async () => {
+    // After #4b the native module rejects (E_TESSERACT) on any worker-thread
+    // failure instead of orphaning the promise. That rejection must NOT trip the
+    // #4 degrade path — it is a clean settlement.
+    recognize.mockRejectedValueOnce(
+      new Error('E_TESSERACT TessBaseAPI.init failed'),
+    );
+
+    const first = await extractArabicTextOnDevice('reject-1');
+    expect(first).toBeNull();
+    expect(recognize).toHaveBeenCalledTimes(1);
+    const disableCalls = scWarnMock.mock.calls.filter(c =>
+      String(c[0]).includes('did not settle'),
+    );
+    expect(disableCalls).toHaveLength(0);
+
+    // Slot was cleared under the generation guard: the next frame starts a fresh
+    // native run and succeeds — no monitoring toggle needed.
+    recognize.mockResolvedValueOnce('نص عربي للاختبار');
+    const second = await extractArabicTextOnDevice('reject-2');
+    expect(recognize).toHaveBeenCalledTimes(2);
+    expect(second).toEqual({
+      text: 'نص عربي للاختبار',
+      confidence: expect.any(Number),
+    });
+  });
 });
