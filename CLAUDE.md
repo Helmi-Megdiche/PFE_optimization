@@ -9,7 +9,7 @@ AI parental-control platform (ESPRIT PFE / internship project). Two independent 
 - **`backend/`** — Node.js + Express + PostgreSQL API (TypeScript, ESM). Stores usage/screen metadata, computes daily scores, generates gamified missions.
 - **`MobileApp/`** — React Native 0.74 Android app (TypeScript) with custom Java/Kotlin native modules. Does all sensitive processing (OCR, NSFW, keyword filtering) **on-device**; only extracted text + risk metadata leave the phone.
 
-The privacy model is central: **no screenshot ever reaches the backend.** The device captures a screen, runs ML Kit OCR + `nsfwjs`/TFLite + a multilingual keyword filter, deletes the image, and POSTs only text (≤500 chars) + risk flags to `POST /api/screen-events`. Preserve this invariant when touching the capture pipeline.
+The privacy model is central: **no screenshot ever reaches the backend.** The device captures a screen, runs ML Kit OCR + `nsfwjs`/TFLite + a multilingual keyword filter, deletes the image, and POSTs only text metadata to `POST /api/screen-events`: a ≤500-char text preview, bounded numeric risk scores, an enum category, the app package/label, and a schema-bounded `imageClassificationDetails` object — a fixed set of named fields (classifier scores + model-label vocabulary), every string length-capped, unknown keys stripped and logged. The schema bounds the shape and size of what the device can send there (~2 KB of model output), not the semantics of each field; every field is server-validated in `backend/src/validators/screenEvents.validator.ts` (the ≤500-char cap enforced there **and** by the `VARCHAR(500)` column). Preserve this invariant when touching the capture pipeline.
 
 ## Working rule
 

@@ -98,7 +98,7 @@ graph TB
 1. Child grants **MediaProjection** permission (foreground service on Android 14+).
 2. Every **30 seconds**, `ScreenCaptureModule` captures a screenshot and saves a temporary JPEG on device.
 3. The hook `useScreenshotCapture` loads the image, runs the **hybrid multilingual OCR** (`mixedScriptOcr.ts`: ML Kit + UI noise filter + Arabizi normalization), and applies the **multilingual keyword filter** (English + French + Arabic + Tunisian Derja).
-4. Only extracted text (≤500 chars), risk flag, category, and metadata are sent to `POST /api/screen-events` – the image is deleted immediately.
+4. Only text metadata is sent to `POST /api/screen-events` – a ≤500-char extracted-text preview, risk flag, numeric scores, category, and a schema-bounded `imageClassificationDetails` object (a fixed set of named fields: classifier scores + model-label vocabulary, every string length-capped, unknown keys stripped); the image is deleted immediately.
 5. Backend stores metadata in the `screen_events` table.
 
 ### Adaptive Capture
@@ -438,6 +438,8 @@ Returns a signed JWT for the seeded test child (`expiresIn: '7d'`). The mobile a
 }
 ```
 
+`imageClassificationDetails` is a fixed schema-bounded object — named fields only (classifier scores + model-label vocabulary), every string length-capped, unknown keys stripped and logged server-side (`backend/src/validators/screenEvents.validator.ts`). `mockHint` is accepted for backward compatibility but not stored.
+
 **Response:** `201 Created` with stored event (includes Sprint 3 vision fields when provided).
 
 ### `GET /api/screen-events/:childId` (parent)
@@ -535,7 +537,7 @@ See also `MobileApp/TESTING.md` if present in the repo.
 
 ## Privacy & Security
 
-- **No screenshots leave the device.** JPEG is temporary; only text metadata is transmitted.
+- **No screenshots leave the device.** JPEG is temporary; only text metadata (≤500-char preview, numeric scores, enum category, app id, and a schema-bounded classifier-details object) is transmitted.
 - **JWT** secures API routes; use strong `JWT_SECRET` in production.
 - **Minimal permissions:** MediaProjection, foreground service, Internet, **Display over other apps** (mission overlay on Android only).
 - **Explicit consent** required before monitoring starts (MediaProjection dialog).
