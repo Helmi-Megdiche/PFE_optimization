@@ -1,5 +1,6 @@
 import { Router, Response } from 'express';
 import { requireParentRole, AuthenticatedRequest } from '../middleware/auth';
+import { requireChildAccess } from '../middleware/childAccess';
 import { validateQuery } from '../middleware/validate';
 import {
   getScoreQuerySchema,
@@ -70,6 +71,7 @@ function mapScoreRow(row: DailyScoreRow) {
 router.get(
   '/:childId/trend',
   requireParentRole,
+  requireChildAccess('param:childId'),
   validateQuery(scoreTrendQuerySchema),
   async (req: AuthenticatedRequest, res: Response) => {
     const { childId } = req.params;
@@ -109,6 +111,7 @@ router.get(
 router.get(
   '/:childId',
   requireParentRole,
+  requireChildAccess('param:childId'),
   validateQuery(getScoreQuerySchema),
   async (req: AuthenticatedRequest, res: Response) => {
     const { childId } = req.params;

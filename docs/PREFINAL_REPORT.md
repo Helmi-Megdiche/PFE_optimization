@@ -655,7 +655,7 @@ The following limitation map was produced during pre-final review and is organis
 | Limitation | Detail |
 |------------|--------|
 | **Screen monitoring is invasive by design** | Even with on-device processing, MediaProjection is sensitive; needs clear consent and strong legal framing (GDPR/COPPA). |
-| **JWT dev tokens** | Fine for PFE; production needs real auth, rotation, and stricter parent–child binding on every route. |
+| **JWT dev tokens** | Parent→child ownership is now enforced on every child-scoped route (`backend/src/middleware/childAccess.ts` + enumeration test); production still needs real authentication (registration / login / token issuance) and secret rotation. |
 | **Migration runner** | `npm run db:migrate` re-runs **all** SQL files — brittle on existing DBs (migration `014` was applied separately during development). |
 | **No horizontal scale story** | Single Node API + Postgres; no queue, no multi-tenant hardening documented. |
 | **Dist folder / build** | Backend serves `dist/`; native/mobile changes need rebuilds (`npm run android`). |
@@ -684,7 +684,7 @@ Sprint 5.8 smoke (`smoke:sprint58`, 34/34 pass) confirms latest features work as
 
 | Priority | Item | Rationale |
 |----------|------|-----------|
-| High | **Multi-child support** + parent ownership on all routes | Closes largest product-shape gap vs. cahier |
+| High | **Multi-child support** (parent ownership on all routes is done — `middleware/childAccess.ts`) | Closes largest product-shape gap vs. cahier |
 | High | **FCM push notifications** | Replace dashboard polling for mission approvals and risky alerts |
 | Medium | **Step counter / activity recognition integration** | Replace mission-based physical activity proxy with sensor ground truth |
 | Medium | **Content quality from `screen_events`** | Use OCR `category: educational` mix, not just app category |

@@ -4,6 +4,7 @@ import {
   requireParentRole,
   AuthenticatedRequest,
 } from '../middleware/auth';
+import { requireChildAccess } from '../middleware/childAccess';
 import { validateBody, validateQuery } from '../middleware/validate';
 import {
   createScreenEventSchema,
@@ -212,6 +213,7 @@ router.post(
 router.get(
   '/:childId',
   requireParentRole,
+  requireChildAccess('param:childId'),
   validateQuery(listScreenEventsQuerySchema),
   async (req: AuthenticatedRequest, res: Response) => {
     const { childId } = req.params;

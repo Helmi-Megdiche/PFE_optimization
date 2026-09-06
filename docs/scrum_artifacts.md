@@ -224,7 +224,7 @@ Velocity was measured qualitatively (epics/features per sprint) rather than in s
 
 - Introduce automated device E2E early (Detox/Appium).
 - Replace proxy-based wellbeing with sensor ground truth.
-- Build a native parent app + FCM push, and add per-route parent–child ownership for production auth.
+- Build a native parent app + FCM push, and add real authentication (registration / login / token issuance) for production — per-route parent–child ownership is now enforced (`backend/src/middleware/childAccess.ts`).
 
 These align with the roadmap in [PREFINAL_REPORT.md](PREFINAL_REPORT.md) §5.
 

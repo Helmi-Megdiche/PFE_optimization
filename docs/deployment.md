@@ -269,7 +269,7 @@ server {
 - [ ] `MISSION_RISK_COOLDOWN_MINUTES=15`.
 - [ ] HTTPS everywhere; HSTS at the proxy.
 - [ ] Managed PostgreSQL with automated backups + SSL.
-- [ ] Replace dev seed + dev tokens with real authentication and per-route parent–child ownership checks.
+- [ ] Replace dev seed + dev tokens with real **authentication** (registration / login / token issuance — none exists yet). Per-route parent–child **ownership** is already enforced (`backend/src/middleware/childAccess.ts` + `tests/routeAuthorization.test.ts`).
 - [ ] Restrict CORS to the dashboard origin.
 - [ ] App points at the HTTPS domain; signed release build.
 - [ ] Log shipping and uptime monitoring on `/api/health`.

@@ -298,7 +298,12 @@ npm run android    # Terminal 2 – build & install
 
 ### JWT Authentication
 
-Protected routes require `Authorization: Bearer <token>`.
+Protected routes require `Authorization: Bearer <token>`. Every route scoped to a `childId`
+also enforces **parent→child ownership** (`requireChildAccess` / `userCanAccessChild` in
+`backend/src/middleware/childAccess.ts`): a parent token only reaches a child in its own
+`children.parent_id`, a child token only its own `childId` claim; otherwise `403`. This is
+authorization on top of a valid token — the tokens themselves are still dev-minted
+(`/api/dev/*-token`); there is no real authentication yet.
 
 | Route | Auth |
 |-------|------|

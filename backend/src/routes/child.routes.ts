@@ -3,6 +3,7 @@ import {
   requireParentRole,
   AuthenticatedRequest,
 } from '../middleware/auth';
+import { requireChildAccess } from '../middleware/childAccess';
 import { validateBody } from '../middleware/validate';
 import {
   updateChildInterestsSchema,
@@ -19,17 +20,6 @@ const router = Router();
 
 router.use(requireParentRole);
 
-async function assertParentOwnsChild(
-  parentId: string,
-  childId: string,
-): Promise<boolean> {
-  const { rows } = await query<{ id: string }>(
-    `SELECT id FROM children WHERE id = $1 AND parent_id = $2 LIMIT 1`,
-    [childId, parentId],
-  );
-  return rows.length > 0;
-}
-
 function normalizeInterests(raw: unknown): string[] {
   if (!Array.isArray(raw)) {
     return [];
@@ -42,16 +32,11 @@ function normalizeInterests(raw: unknown): string[] {
  */
 router.get(
   '/profile/:childId',
+  requireChildAccess('param:childId'),
   async (req: AuthenticatedRequest, res: Response) => {
     const { childId } = req.params;
-    const parentId = req.user!.sub;
 
     try {
-      if (!(await assertParentOwnsChild(parentId, childId))) {
-        res.status(403).json({ error: 'Access denied for this child' });
-        return;
-      }
-
       const { rows } = await query<{
         display_name: string;
         birth_year: number | null;
@@ -85,6 +70,7 @@ router.get(
 router.put(
   '/profile',
   validateBody(updateChildProfileSchema),
+  requireChildAccess('body:childId'),
   async (req: AuthenticatedRequest, res: Response) => {
     const { childId, birthYear } = req.body as {
       childId: string;
@@ -93,11 +79,6 @@ router.put(
     const parentId = req.user!.sub;
 
     try {
-      if (!(await assertParentOwnsChild(parentId, childId))) {
-        res.status(403).json({ error: 'Access denied for this child' });
-        return;
-      }
-
       const { rows } = await query<{
         display_name: string;
         birth_year: number | null;
@@ -139,16 +120,11 @@ router.put(
  */
 router.get(
   '/interests/:childId',
+  requireChildAccess('param:childId'),
   async (req: AuthenticatedRequest, res: Response) => {
     const { childId } = req.params;
-    const parentId = req.user!.sub;
 
     try {
-      if (!(await assertParentOwnsChild(parentId, childId))) {
-        res.status(403).json({ error: 'Access denied for this child' });
-        return;
-      }
-
       const { rows } = await query<{ interests: unknown }>(
         `SELECT interests FROM children WHERE id = $1`,
         [childId],
@@ -171,6 +147,7 @@ router.get(
 router.put(
   '/interests',
   validateBody(updateChildInterestsSchema),
+  requireChildAccess('body:childId'),
   async (req: AuthenticatedRequest, res: Response) => {
     const { childId, interests } = req.body as {
       childId: string;
@@ -179,11 +156,6 @@ router.put(
     const parentId = req.user!.sub;
 
     try {
-      if (!(await assertParentOwnsChild(parentId, childId))) {
-        res.status(403).json({ error: 'Access denied for this child' });
-        return;
-      }
-
       await query(
         `UPDATE children SET interests = $1::jsonb WHERE id = $2 AND parent_id = $3`,
         [JSON.stringify(interests), childId, parentId],

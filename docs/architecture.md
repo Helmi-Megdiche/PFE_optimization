@@ -262,7 +262,7 @@ erDiagram
 
 ## 6. API Surface
 
-Registered in `backend/src/routes/index.ts`. `/health` is public; `/dev/*` and `/debug/*` are mounted **only when not production**; everything else requires `Authorization: Bearer <JWT>`.
+Registered in `backend/src/routes/index.ts`. `/health` is public; `/dev/*` and `/debug/*` are mounted **only when not production**; everything else requires `Authorization: Bearer <JWT>`. Every route scoped to a `childId` additionally enforces parent→child ownership via `requireChildAccess` / `userCanAccessChild` (`backend/src/middleware/childAccess.ts`), guarded by an enumeration test (`backend/tests/routeAuthorization.test.ts`) that reds when a child-scoped route ships without it.
 
 | Method | Path | Role | Purpose |
 |--------|------|------|---------|
@@ -420,7 +420,7 @@ Condensed decision log; rationale expanded in [PREFINAL_REPORT.md](PREFINAL_REPO
 | ADR-7 | Cooldown + resurface (no spam) | Prevent bypass by completing then returning | More complex mission state machine |
 | ADR-8 | Web dashboard, not native parent app | PFE iteration speed | Web-only parent experience; polling not push |
 | ADR-9 | Sequential SQL migrations + `schema_migrations` ledger | Simplicity, reviewability | Runner applies each file once in its own transaction; re-run is a no-op, applied-file edits refused by checksum, pre-ledger DBs auto-baselined |
-| ADR-10 | JWT dev tokens | Sufficient for demo | Production needs real auth + per-route ownership |
+| ADR-10 | JWT dev tokens | Sufficient for demo | Per-route parent→child ownership is now enforced (`middleware/childAccess.ts` + enumeration test); real authentication / registration / token issuance is still missing — the only JWT source is the unauthenticated `/api/dev/*-token` |
 
 ---
 

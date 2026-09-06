@@ -4,6 +4,7 @@ import {
   requireParentRole,
   AuthenticatedRequest,
 } from '../middleware/auth';
+import { requireChildAccess } from '../middleware/childAccess';
 import { validateBody, validateQuery } from '../middleware/validate';
 import { postUsageSchema, listUsageQuerySchema } from '../validators/usage.validator';
 import { query } from '../db/pool';
@@ -75,6 +76,7 @@ router.post(
 router.get(
   '/:childId',
   requireParentRole,
+  requireChildAccess('param:childId'),
   validateQuery(listUsageQuerySchema),
   async (req: AuthenticatedRequest, res: Response) => {
     const { childId } = req.params;

@@ -3,6 +3,7 @@ import {
   requireParentRole,
   AuthenticatedRequest,
 } from '../middleware/auth';
+import { requireChildAccess } from '../middleware/childAccess';
 import { validateBody } from '../middleware/validate';
 import { bonusPointsSchema } from '../validators/bonus.validator';
 import { query } from '../db/pool';
@@ -11,33 +12,16 @@ import { addPoints, getChildPoints } from '../services/gamificationService';
 
 const router = Router();
 
-function assertChildAccess(
-  req: AuthenticatedRequest,
-  childId: string,
-  res: Response,
-): boolean {
-  if (req.user?.role === 'parent') {
-    return true;
-  }
-  if (req.user?.role === 'child' && req.user.childId === childId) {
-    return true;
-  }
-  res.status(403).json({ error: 'Access denied for this child' });
-  return false;
-}
-
 /**
  * POST /api/bonus/child/:childId
  */
 router.post(
   '/child/:childId',
   requireParentRole,
+  requireChildAccess('param:childId'),
   validateBody(bonusPointsSchema),
   async (req: AuthenticatedRequest, res: Response) => {
     const { childId } = req.params;
-    if (!assertChildAccess(req, childId, res)) {
-      return;
-    }
 
     const { points, reason } = req.body as { points: number; reason?: string };
 

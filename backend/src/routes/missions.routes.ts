@@ -1,10 +1,14 @@
-import { Router, Response } from 'express';
+import { Router, Response, NextFunction } from 'express';
 import { env } from '../config/env';
 import {
   requireChildRole,
   requireParentRole,
   AuthenticatedRequest,
 } from '../middleware/auth';
+import {
+  requireChildAccess,
+  userCanAccessChild,
+} from '../middleware/childAccess';
 import { validateBody } from '../middleware/validate';
 import {
   completeMissionSchema,
@@ -70,19 +74,22 @@ function mapMission(row: MissionRow) {
   };
 }
 
-function assertChildAccess(
-  req: AuthenticatedRequest,
-  childId: string,
+/**
+ * Named guard that must run FIRST on `/generate` — in production the whole route
+ * is a flat 404 for everyone, *before* any role / body / ownership branch, so it
+ * cannot become a `403` vs `404` ownership oracle on an endpoint meant to be
+ * invisible (see CLAUDE.md, the `#8-SF4` failure class).
+ */
+function devOnlyRoute(
+  _req: AuthenticatedRequest,
   res: Response,
-): boolean {
-  if (req.user?.role === 'parent') {
-    return true;
+  next: NextFunction,
+): void {
+  if (env.isProduction) {
+    res.status(404).json({ error: 'Not found' });
+    return;
   }
-  if (req.user?.role === 'child' && req.user.childId === childId) {
-    return true;
-  }
-  res.status(403).json({ error: 'Access denied for this child' });
-  return false;
+  next();
 }
 
 /**
@@ -118,13 +125,11 @@ router.post(
  */
 router.post(
   '/generate',
+  devOnlyRoute,
+  requireParentRole,
   validateBody(generateMissionDevSchema),
+  requireChildAccess('body:childId'),
   async (req: AuthenticatedRequest, res: Response) => {
-    if (env.isProduction) {
-      res.status(404).json({ error: 'Not found' });
-      return;
-    }
-
     const { childId, triggerType, score, category } = req.body as {
       childId: string;
       triggerType: string;
@@ -159,11 +164,9 @@ router.post(
  */
 router.get(
   '/child/:childId/points',
+  requireChildAccess('param:childId'),
   async (req: AuthenticatedRequest, res: Response) => {
     const { childId } = req.params;
-    if (!assertChildAccess(req, childId, res)) {
-      return;
-    }
 
     try {
       const totalPoints = await getChildPoints(childId);
@@ -183,11 +186,9 @@ router.get(
  */
 router.get(
   '/child/:childId',
+  requireChildAccess('param:childId'),
   async (req: AuthenticatedRequest, res: Response) => {
     const { childId } = req.params;
-    if (!assertChildAccess(req, childId, res)) {
-      return;
-    }
 
     try {
       await expireStaleMissions(childId);
@@ -238,7 +239,12 @@ router.post(
         res.status(404).json({ error: 'Mission not found' });
         return;
       }
-      if (!assertChildAccess(req, mission.child_id, res)) {
+      // Derived child id — ownership can only be checked after the mission row is
+      // loaded, so this is an in-handler call, not the route-chain middleware.
+      // `tests/routeAuthorization.test.ts` allow-lists these two routes and
+      // asserts this call is present in the source.
+      if (!(await userCanAccessChild(req.user, mission.child_id))) {
+        res.status(403).json({ error: 'Access denied for this child' });
         return;
       }
       if (mission.status !== 'pending_approval') {
@@ -286,7 +292,12 @@ router.post(
         res.status(404).json({ error: 'Mission not found' });
         return;
       }
-      if (!assertChildAccess(req, mission.child_id, res)) {
+      // Derived child id — ownership can only be checked after the mission row is
+      // loaded, so this is an in-handler call, not the route-chain middleware.
+      // `tests/routeAuthorization.test.ts` allow-lists these two routes and
+      // asserts this call is present in the source.
+      if (!(await userCanAccessChild(req.user, mission.child_id))) {
+        res.status(403).json({ error: 'Access denied for this child' });
         return;
       }
       if (mission.status !== 'pending_approval') {
