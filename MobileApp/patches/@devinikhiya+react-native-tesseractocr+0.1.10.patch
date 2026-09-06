@@ -1,0 +1,147 @@
+diff --git a/node_modules/@devinikhiya/react-native-tesseractocr/android/src/main/java/com/reactnativetesseractocr/TesseractocrModule.java b/node_modules/@devinikhiya/react-native-tesseractocr/android/src/main/java/com/reactnativetesseractocr/TesseractocrModule.java
+index a804036..7caebbd 100644
+--- a/node_modules/@devinikhiya/react-native-tesseractocr/android/src/main/java/com/reactnativetesseractocr/TesseractocrModule.java
++++ b/node_modules/@devinikhiya/react-native-tesseractocr/android/src/main/java/com/reactnativetesseractocr/TesseractocrModule.java
+@@ -89,13 +89,31 @@ public class TesseractocrModule extends ReactContextBaseJavaModule {
+                 new Thread() {
+                     @Override
+                     public void run() {
+-                        tesseract = createTesseractAPI(lagforTesString, tessOptions);
+-                        tesseract.setImage(bitmap);
+-                        tesseract.getHOCRText(0);
+-                        String recognizedText = tesseract.getUTF8Text();
+-
+-                        tesseract.recycle();
+-                        promise.resolve(recognizedText);
++                        TessBaseAPI local = null;
++                        try {
++                            local = createTesseractAPI(lagforTesString, tessOptions);
++                            local.setImage(bitmap);
++                            local.getHOCRText(0);
++                            String recognizedText = local.getUTF8Text();
++                            promise.resolve(recognizedText);
++                        } catch (Throwable t) {
++                            Log.e(getName(), "Recognition failed on worker thread. " + t.toString(), t);
++                            // The promise may already be consumed - promise.resolve above can throw
++                            // "Illegal callback invocation" when the RN catalyst instance is gone
++                            // (root remount). Landing here would then re-invoke a spent callback and
++                            // throw again, uncaught, out of run() on a worker thread.
++                            try {
++                                promise.reject("E_TESSERACT", t.toString());
++                            } catch (Throwable ignored) {
++                            }
++                        } finally {
++                            if (local != null) {
++                                try {
++                                    local.recycle();
++                                } catch (Throwable ignored) {
++                                }
++                            }
++                        }
+                     }
+ 
+                 }.start();
+@@ -128,36 +146,59 @@ public class TesseractocrModule extends ReactContextBaseJavaModule {
+                 new Thread() {
+                     @Override
+                     public void run() {
+-                        tesseract = createTesseractAPI(lang, tessOptions);
+-                        tesseract.setImage(bitmap);
+-                        tesseract.getHOCRText(0);
+-
+-                        WritableArray tokens = Arguments.createArray();
+-                        WritableMap tempMap;
+-                        WritableMap bounding;
+-
+-                        ResultIterator iterator = tesseract.getResultIterator();
+-                        iterator.begin();
+-
+-                        do {
+-                            bounding = Arguments.createMap();
+-                            tempMap = Arguments.createMap();
+-                            Rect rect = iterator.getBoundingRect(iteratorLevel);
+-
+-                            bounding.putInt("bottom", rect.bottom);
+-                            bounding.putInt("left", rect.left);
+-                            bounding.putInt("right", rect.right);
+-                            bounding.putInt("top", rect.top);
+-
+-                            tempMap.putString("token", iterator.getUTF8Text(iteratorLevel));
+-                            tempMap.putDouble("confidence", iterator.confidence(iteratorLevel));
+-                            tempMap.putMap("bounding", bounding);
+-                            tokens.pushMap(tempMap);
+-                        } while (iterator.next(iteratorLevel));
+-
+-                        iterator.delete();
+-                        tesseract.recycle();
+-                        promise.resolve(tokens);
++                        TessBaseAPI local = null;
++                        ResultIterator iterator = null;
++                        try {
++                            local = createTesseractAPI(lang, tessOptions);
++                            local.setImage(bitmap);
++                            local.getHOCRText(0);
++
++                            WritableArray tokens = Arguments.createArray();
++                            WritableMap tempMap;
++                            WritableMap bounding;
++
++                            iterator = local.getResultIterator();
++                            iterator.begin();
++
++                            do {
++                                bounding = Arguments.createMap();
++                                tempMap = Arguments.createMap();
++                                Rect rect = iterator.getBoundingRect(iteratorLevel);
++
++                                bounding.putInt("bottom", rect.bottom);
++                                bounding.putInt("left", rect.left);
++                                bounding.putInt("right", rect.right);
++                                bounding.putInt("top", rect.top);
++
++                                tempMap.putString("token", iterator.getUTF8Text(iteratorLevel));
++                                tempMap.putDouble("confidence", iterator.confidence(iteratorLevel));
++                                tempMap.putMap("bounding", bounding);
++                                tokens.pushMap(tempMap);
++                            } while (iterator.next(iteratorLevel));
++
++                            promise.resolve(tokens);
++                        } catch (Throwable t) {
++                            Log.e(getName(), "Token recognition failed on worker thread. " + t.toString(), t);
++                            // Guarded for the same reason as recognize() - a spent promise
++                            // (resolve threw on a dead catalyst) must not be re-invoked here.
++                            try {
++                                promise.reject("E_TESSERACT", t.toString());
++                            } catch (Throwable ignored) {
++                            }
++                        } finally {
++                            if (iterator != null) {
++                                try {
++                                    iterator.delete();
++                                } catch (Throwable ignored) {
++                                }
++                            }
++                            if (local != null) {
++                                try {
++                                    local.recycle();
++                                } catch (Throwable ignored) {
++                                }
++                            }
++                        }
+                     }
+ 
+                 }.start();
+@@ -176,7 +217,12 @@ public class TesseractocrModule extends ReactContextBaseJavaModule {
+ 
+     private TessBaseAPI createTesseractAPI(String lang, @Nullable final ReadableMap tessOptions) {
+         TessBaseAPI tessBaseAPI = new TessBaseAPI(createProgressNotifier());
+-        tessBaseAPI.init(DATA_PATH + File.separator, lang);
++        boolean initOk = tessBaseAPI.init(DATA_PATH + File.separator, lang);
++        if (!initOk) {
++            tessBaseAPI.recycle();
++            throw new IllegalStateException(
++                "TessBaseAPI.init failed for '" + lang + "' - missing or corrupt traineddata under " + DATA_PATH);
++        }
+ 
+         if (tessOptions != null) {
+ 
