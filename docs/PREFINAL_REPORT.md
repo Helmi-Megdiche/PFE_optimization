@@ -147,8 +147,7 @@ The backend compiles TypeScript to `dist/` for production (`npm run build && npm
 
 | Artifact | Path | Notes |
 |----------|------|-------|
-| Source | `demo_dashboard.html` (repo root) | Editable source |
-| Served copy | `backend/public/demo.html` | Synced via `npm run sync:demo` |
+| Dashboard | `demo_dashboard.html` (repo root) | Served directly at `/demo.html` — no copy, no sync step (ALL_IS_FIXED #5) |
 | Access | `http://localhost:3000/demo.html` | Requires parent JWT from `/api/dev/parent-token` in development |
 
 The dashboard provides **Monitoring** and **Parent** tabs: screen events, usage/scores trends, mission approval/reject, bonus points, rewards management, badge display, and a **checkbox-only interests picker** (five predefined tags — no free-text input).
@@ -542,7 +541,7 @@ Authentication uses `fetchWithAuth` with parent JWT stored in `localStorage`. Ch
 **Why this approach**
 
 - Rapid iteration for PFE demo without building a separate parent React Native app.
-- Same origin as API (`backend/public/`) avoids CORS complexity in development.
+- Same origin as the API avoids CORS complexity in development.
 
 **Limitations**
 

@@ -196,7 +196,6 @@ PFE/
 │   ├── .env.example
 │   ├── docker-compose.yml         # Postgres on host port 5433
 │   └── package.json
-├── backend/public/demo.html       # Parent dashboard (also served at /demo.html)
 ├── MobileApp/                     # Primary React Native app (use this)
 │   ├── android/
 │   │   └── app/src/main/java/com/mobileapp/
@@ -215,7 +214,7 @@ PFE/
 │   │   ├── config/apiConfig.ts
 │   │   └── utils/keywordFilter.ts
 │   └── package.json
-├── demo_dashboard.html            # Parent dashboard source (sync with backend/public/)
+├── demo_dashboard.html            # Parent dashboard — served directly at /demo.html (no sync step)
 ├── docs/                          # Report artefacts (to be expanded)
 ├── README.md
 └── .gitignore
@@ -763,12 +762,7 @@ Pure game logic lives in `MobileApp/src/missions/games/gameLogic.ts` (unit-teste
 | **Points refresh** | Pull on focus / pull-to-refresh; optional 60s poll on Missions & Profile (no push) |
 | **Log out / JWT refresh** | Profile → **Log out / refresh JWT** clears AsyncStorage and re-fetches a dev child token; also runs automatically on expired `exp` or API **401** |
 
-**Parent dashboard:** [`http://localhost:3000/demo.html`](http://localhost:3000/demo.html) (served from `backend/public/demo.html`). Edit root [`demo_dashboard.html`](demo_dashboard.html), then sync:
-
-```bash
-cd backend
-npm run sync:demo
-```
+**Parent dashboard:** [`http://localhost:3000/demo.html`](http://localhost:3000/demo.html) — served directly from the repo-root [`demo_dashboard.html`](demo_dashboard.html) (no copy, no sync step; ALL_IS_FIXED #5). Edit the file and reload.
 
 **For browser notifications, use the backend URL** — `file://` may block notifications.
 
@@ -848,7 +842,7 @@ Script: [`backend/scripts/test-sprint59.ts`](backend/scripts/test-sprint59.ts) �
 |---------|---------|
 | **Quiz bank** | Table `quiz_questions` (`011_quiz_questions.sql`, `013_quiz_media_violence.sql`) — types `safety`, `media_violence`, `conflict`, `empathy`; filtered by child age (`age_min` / `age_max`). `quizService.getRandomQuestions` + `enrichQuizMetadata` attach questions to quiz missions at generation time. Mobile `QuizScreen` reads `metadata.questions` (falls back to `quizBank.ts` if empty). |
 | **Custom missions** | Table `custom_missions` (`012_custom_missions.sql`) — parent CRUD via `GET/POST/PUT/DELETE /api/custom-missions`. Active missions are merged into real-world template pools in `pickMissionTemplate`. |
-| **Dashboard** | **Custom real-world missions** section on [`demo_dashboard.html`](demo_dashboard.html) and [`backend/public/demo.html`](backend/public/demo.html) — create, edit, delete. |
+| **Dashboard** | **Custom real-world missions** section on [`demo_dashboard.html`](demo_dashboard.html) (served at `/demo.html`) — create, edit, delete. |
 | **OCR false positives** | `benignRiskContext` filters `nsfw` / `adult` on SafeSearch/Fiverr parental UI and parent-dashboard OCR; wired in mobile + backend `keywordFilter`. |
 | **Risky web search** | `riskySearchContext` boosts `nsfw` / `adult` when OCR shows an explicit query on Google/Bing/DuckDuckGo search URLs (complements benign filters). |
 | **Native overlay games** | `OverlayQuizHelper` / `OverlayMissionLauncher` — quiz and minigame/cognitive missions open in-app from overlay; `missionCaptureSession` dedupes capture while a mission is active. |

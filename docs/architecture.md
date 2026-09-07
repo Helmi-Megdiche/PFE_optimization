@@ -136,7 +136,7 @@ graph TB
 
 ### 3.3 Parent dashboard
 
-Self-contained `demo_dashboard.html` (source at repo root) synced to `backend/public/demo.html` via `npm run sync:demo`, served at `http://<host>:3000/demo.html`. Uses `fetchWithAuth` with a parent JWT in `localStorage`.
+Self-contained `demo_dashboard.html` (at the repo root) served directly at `http://<host>:3000/demo.html` — no copy under `backend/public/`, no sync step (ALL_IS_FIXED #5). Uses `fetchWithAuth` with a parent JWT in `localStorage`.
 
 ---
 

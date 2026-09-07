@@ -178,12 +178,7 @@ The daily scoring cron is in-process (`node-cron`, 01:00 server-local). Ensure t
 
 ## 6. Parent Dashboard Deployment
 
-The dashboard source is `demo_dashboard.html` (repo root). Sync it into the API's static folder and it is served at `/demo.html`:
-
-```bash
-cd backend
-npm run sync:demo      # copies demo_dashboard.html -> backend/public/demo.html
-```
+The dashboard is `demo_dashboard.html` (repo root). The API serves it directly at `/demo.html` from that file — there is no copy under `backend/public/` and no sync step (ALL_IS_FIXED #5). A deploy must keep `demo_dashboard.html` one level above the backend directory (i.e. at the repo root, as checked out), or drop a copy at `backend/public/demo.html` — the `express.static` mount still serves that as a fallback. A missing file returns 404, not 500.
 
 - Access: `https://<your-domain>/demo.html`.
 - Use the backend URL (not `file://`) so browser notifications work.
@@ -316,7 +311,7 @@ More detail in [README.md](../README.md) ("Common issues") and [architecture.md]
 2. Update `README.md` and `docs/` as needed.
 3. Build backend (`npm run build`) and Android release artifact.
 4. Apply DB migrations to the target database.
-5. Deploy backend (`node dist/index.js`) behind HTTPS; sync dashboard.
+5. Deploy backend (`node dist/index.js`) behind HTTPS; ensure `demo_dashboard.html` is present at the repo root (served at `/demo.html`).
 6. Smoke-test `GET /api/health` and one end-to-end capture → mission → approval.
 7. Tag the release (e.g. `git tag v1.0-final`).
 
