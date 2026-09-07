@@ -403,9 +403,125 @@ describe('generateMissionForChild', () => {
   });
 });
 
+describe('generateMissionForChild — forced template (dev)', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockedCountPending.mockResolvedValue(0);
+    mockedGetChildAge.mockResolvedValue(12);
+    mockedGetChildParentId.mockResolvedValue(null);
+    mockedGetRecentScores.mockResolvedValue({
+      addictionScore: 75,
+      wellbeingScore: 35,
+      date: '2026-05-29',
+    });
+    mockedGetHistory.mockResolvedValue([]);
+    mockQueryWithInterests();
+  });
+
+  afterEach(() => {
+    // tests 1 and 5 install a Math.random spy; the file has no file-scope
+    // restore, so without this it leaks into every later test in the suite.
+    jest.restoreAllMocks();
+  });
+
+  it('forced templateKey wins over the random pick — selection is never entered', async () => {
+    const randomSpy = jest.spyOn(Math, 'random');
+
+    const result = await generateMissionForChild(
+      'child-1',
+      { type: 'high_addiction', score: 80 }, // pool is nback/tower/digital_detox — no tictactoe
+      { forceTemplateKey: 'tictactoe' },
+    );
+
+    expect(result.created).toBe(true);
+    const insertArgs = getMissionInsertArgs();
+    expect(insertArgs[1]).toBe('Tic-Tac-Toe');
+    const metadata = JSON.parse(insertArgs[5] as string);
+    expect(metadata.templateKey).toBe('tictactoe');
+    expect(metadata.game).toBe('tictactoe');
+    expect(randomSpy).not.toHaveBeenCalled();
+  });
+
+  it('forced templateKey survives the age rewrite (age >= 13)', async () => {
+    mockedGetChildAge.mockResolvedValue(15);
+
+    await generateMissionForChild(
+      'child-1',
+      { type: 'risky_content', score: 50 },
+      { forceTemplateKey: 'tictactoe' },
+    );
+
+    const metadata = JSON.parse(getMissionInsertArgs()[5] as string);
+    expect(metadata.templateKey).toBe('tictactoe');
+  });
+
+  it('forced templateKey ignores the pending limit; an un-forced call in the same state still blocks', async () => {
+    mockedCountPending.mockResolvedValue(5);
+
+    const forced = await generateMissionForChild(
+      'child-1',
+      { type: 'risky_content', score: 50 },
+      { forceTemplateKey: 'reaction' },
+    );
+    expect(forced.created).toBe(true);
+
+    const unforced = await generateMissionForChild('child-1', {
+      type: 'high_addiction',
+      score: 80,
+    });
+    expect(unforced.created).toBe(false);
+    expect(unforced.reason).toBe('pending_limit_reached');
+  });
+
+  it('quiz enrichment still runs on the forced path', async () => {
+    await generateMissionForChild(
+      'child-1',
+      { type: 'risky_content', score: 50 },
+      { forceTemplateKey: 'quiz_safety' },
+    );
+
+    expect(mockedEnrichQuiz).toHaveBeenCalledWith(
+      'quiz_safety',
+      expect.anything(),
+      expect.anything(),
+    );
+  });
+
+  it('without forceTemplateKey, selection still runs (pending gate consulted, first pool element chosen)', async () => {
+    jest.spyOn(Math, 'random').mockReturnValue(0);
+
+    await generateMissionForChild('child-1', { type: 'high_addiction', score: 80 });
+
+    expect(mockedCountPending).toHaveBeenCalled();
+    const metadata = JSON.parse(getMissionInsertArgs()[5] as string);
+    expect(metadata.templateKey).toBe('nback');
+  });
+
+  it('unknown forceTemplateKey throws before any INSERT', async () => {
+    await expect(
+      generateMissionForChild(
+        'child-1',
+        { type: 'risky_content', score: 50 },
+        { forceTemplateKey: 'not_a_real_template' },
+      ),
+    ).rejects.toThrow(/Unknown mission template key/);
+
+    const insertCall = mockedQuery.mock.calls.find(
+      (call) =>
+        typeof call[0] === 'string' && call[0].includes('INSERT INTO missions'),
+    );
+    expect(insertCall).toBeUndefined();
+  });
+});
+
 describe('generateMissionFromRisk', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    // Deterministic template pick: the 'applies escalation ...' case asserts
+    // finalPoints === ceil(30 * 1.3), which needs a 30-point template. This
+    // block previously relied on a Math.random stub leaking in from the
+    // preceding describe; make it self-sufficient.
+    jest.spyOn(Math, 'random').mockReturnValue(0);
     mockedAdaptiveThreshold.mockResolvedValue(50);
     mockedCumulativeRisk.mockResolvedValue({ sum: 0, count: 0 });
     mockedRecentRisky.mockResolvedValue(false);

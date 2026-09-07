@@ -367,6 +367,18 @@ function cloneTemplate(key: string): { key: string; template: MissionTemplate } 
 }
 
 /**
+ * Dev-only (POST /api/missions/dev/force): use an exact template key, skipping
+ * `pickMissionTemplate` (the random pool draw) and `buildTemplateFromPick` (the
+ * age rewrite / age-13 nback bump). `cloneTemplate` does no rewriting.
+ */
+function forceTemplate(key: string): { key: string; template: MissionTemplate } {
+  if (!Object.prototype.hasOwnProperty.call(MISSION_TEMPLATES, key)) {
+    throw new Error(`Unknown mission template key: ${key}`);
+  }
+  return cloneTemplate(key);
+}
+
+/**
  * Pure decision tree for mission template selection (unit-testable).
  */
 export function pickMissionTemplate(input: PickMissionInput): {
@@ -428,6 +440,11 @@ export interface MissionGenerationContext {
   category?: string;
   escalationLevel?: number;
   escalationMultiplier?: number;
+  /**
+   * Dev-only (POST /api/missions/dev/force): skip template selection, the age
+   * rewrite and the pending-limit gate. `undefined` on every production path.
+   */
+  forceTemplateKey?: string;
 }
 
 const MAX_PENDING_MISSIONS = 3;
@@ -453,9 +470,13 @@ export async function generateMissionForChild(
 ): Promise<MissionGenerationResult> {
   await expireStaleMissions(childId);
 
-  const pendingCount = await countPendingMissions(childId);
-  if (pendingCount >= MAX_PENDING_MISSIONS) {
-    return { created: false, reason: 'pending_limit_reached' };
+  const forceKey = context?.forceTemplateKey;
+
+  if (!forceKey) {
+    const pendingCount = await countPendingMissions(childId);
+    if (pendingCount >= MAX_PENDING_MISSIONS) {
+      return { created: false, reason: 'pending_limit_reached' };
+    }
   }
 
   const [age, recentScores, history, parentId, interests] = await Promise.all([
@@ -473,18 +494,20 @@ export async function generateMissionForChild(
   const addictionScore = recentScores?.addictionScore ?? 0;
   const wellbeingScore = recentScores?.wellbeingScore ?? 50;
 
-  const { key, template: pickedTemplate } = pickMissionTemplate({
-    triggerReason: trigger.type,
-    triggerScore: trigger.score,
-    addictionScore,
-    wellbeingScore,
-    combinedRiskScore: context?.combinedRiskScore,
-    category: context?.category,
-    age,
-    recentTemplateKeys: extractTemplateKeys(history),
-    customMissions,
-    interests,
-  });
+  const { key, template: pickedTemplate } = forceKey
+    ? forceTemplate(forceKey)
+    : pickMissionTemplate({
+        triggerReason: trigger.type,
+        triggerScore: trigger.score,
+        addictionScore,
+        wellbeingScore,
+        combinedRiskScore: context?.combinedRiskScore,
+        category: context?.category,
+        age,
+        recentTemplateKeys: extractTemplateKeys(history),
+        customMissions,
+        interests,
+      });
 
   let template =
     pickedTemplate.type === 'quiz'

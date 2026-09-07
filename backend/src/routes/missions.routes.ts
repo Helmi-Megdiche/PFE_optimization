@@ -12,15 +12,18 @@ import {
 import { validateBody } from '../middleware/validate';
 import {
   completeMissionSchema,
+  forceMissionDevSchema,
   generateMissionDevSchema,
   suggestMissionSchema,
 } from '../validators/missions.validator';
 import { query } from '../db/pool';
 import { logger } from '../utils/logger';
 import {
+  generateMissionForChild,
   generateMissionFromHighAddiction,
   generateMissionFromLowWellbeing,
   generateMissionFromRisk,
+  type MissionTriggerReason,
 } from '../services/missionGenerator';
 import {
   evaluateMissionCompletion,
@@ -155,6 +158,74 @@ router.post(
         err: err instanceof Error ? err.message : String(err),
       });
       res.status(500).json({ error: 'Failed to generate mission' });
+    }
+  },
+);
+
+/**
+ * POST /api/missions/dev/force — dev-only: force a specific mission template for
+ * a child, bypassing the cooldown, the adaptive risk threshold, the pending
+ * limit, the random template pick and the age-based rewrite. Every gate stays
+ * intact for the real generation paths. `devOnlyRoute` runs FIRST — a flat 404
+ * in production, before any role / body / ownership branch, so this cannot
+ * become a 403-vs-404 ownership oracle on an endpoint meant to be invisible
+ * (CLAUDE.md, the `#8-SF4` failure class). Inventoried as `child:body`.
+ */
+router.post(
+  '/dev/force',
+  devOnlyRoute,
+  requireParentRole,
+  validateBody(forceMissionDevSchema),
+  requireChildAccess('body:childId'),
+  async (req: AuthenticatedRequest, res: Response) => {
+    const { childId, templateKey, triggerReason, category, score } = req.body as {
+      childId: string;
+      templateKey: string;
+      triggerReason: MissionTriggerReason;
+      category?: string;
+      score: number;
+    };
+
+    try {
+      const result = await generateMissionForChild(
+        childId,
+        { type: triggerReason, score },
+        { category, forceTemplateKey: templateKey },
+      );
+
+      if (!result.created || !result.missionId) {
+        // The forced path skips every gate, so a non-create is unexpected.
+        logger.error('Force mission produced no row', { childId, templateKey, result });
+        res.status(500).json({ error: 'Failed to force mission' });
+        return;
+      }
+
+      const { rows } = await query<MissionRow>(
+        `SELECT ${MISSION_SELECT} FROM missions WHERE id = $1 LIMIT 1`,
+        [result.missionId],
+      );
+      const m = rows[0];
+      const meta = (m.metadata ?? {}) as Record<string, unknown>;
+
+      res.status(201).json({
+        created: true,
+        mission: {
+          id: m.id,
+          title: m.title,
+          description: m.description,
+          points: m.points,
+          status: m.status,
+          type: meta.type ?? 'real_world',
+          metadata: meta,
+        },
+      });
+    } catch (err) {
+      logger.error('Force mission failed', {
+        childId,
+        templateKey,
+        err: err instanceof Error ? err.message : String(err),
+      });
+      res.status(500).json({ error: 'Failed to force mission' });
     }
   },
 );

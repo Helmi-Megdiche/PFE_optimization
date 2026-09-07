@@ -139,6 +139,7 @@ const ROUTE_INVENTORY: InvEntry[] = [
   // --- missions ---
   { key: 'POST /api/missions/suggest', access: 'child:token' },
   { key: 'POST /api/missions/generate', access: 'child:body' },
+  { key: 'POST /api/missions/dev/force', access: 'child:body' },
   { key: 'GET /api/missions/child/:childId/points', access: 'child:param' },
   { key: 'GET /api/missions/child/:childId', access: 'child:param' },
   { key: 'POST /api/missions/:missionId/approve', access: 'child:derived' },
