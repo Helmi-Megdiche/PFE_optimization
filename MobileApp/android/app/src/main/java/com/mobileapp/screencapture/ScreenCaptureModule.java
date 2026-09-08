@@ -101,7 +101,10 @@ public class ScreenCaptureModule extends ReactContextBaseJavaModule
 
     private Runnable captureLoopRunnable;
     private Promise permissionPromise;
-    private long lastCaptureEmittedAtMs = 0;
+    // Written on the main thread (emitScreenCaptured, via mainHandler.post), read on the
+    // bridge thread (captureNow's MIN_CAPTURE_INTERVAL_MS floor check) — volatile for
+    // cross-thread visibility (ALL_IS_FIXED #11, F3).
+    private volatile long lastCaptureEmittedAtMs = 0;
 
     // Perceptual-hash frame-skip gate. Accessed on captureThread (gate) and the JS-call
     // thread (forceNextCapture / teardown reset); volatile / atomic is sufficient.
