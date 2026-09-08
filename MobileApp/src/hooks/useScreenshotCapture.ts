@@ -684,7 +684,7 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
             fg = { packageName: 'unknown', appLabel: 'unknown', source: 'none' };
           } else {
             fg = await withTimeout(
-              resolveForegroundAppWithRetry(3, 200),
+              resolveForegroundAppWithRetry(3, 200, ownAppInBackground),
               FOREGROUND_LOOKUP_TIMEOUT_MS,
               { packageName: 'unknown', appLabel: 'unknown', source: 'none' },
             );
@@ -1728,8 +1728,11 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
       if (nextState === 'background' || nextState === 'inactive') {
         scLog('AppState left foreground — triggering capture', { nextState });
         void (async () => {
+          // Inside this branch nextState is narrowed to 'background' | 'inactive' by the
+          // enclosing check above — backgrounded is unconditionally true here, not
+          // re-derived from AppState.currentState.
           const fg = await withTimeout(
-            resolveForegroundAppWithRetry(3, 200),
+            resolveForegroundAppWithRetry(3, 200, true),
             FOREGROUND_LOOKUP_TIMEOUT_MS,
             { packageName: 'unknown', appLabel: 'unknown', source: 'none' as const },
           );

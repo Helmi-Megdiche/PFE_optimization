@@ -141,10 +141,19 @@ export async function resolveForegroundApp(): Promise<ForegroundAppInfo> {
   return pending;
 }
 
-/** Retry briefly — UsageStats can return null during MediaProjection capture. */
+/**
+ * Retry briefly — UsageStats can return null during MediaProjection capture.
+ *
+ * `backgrounded` must be passed explicitly by the caller: React Native freezes JS
+ * `setTimeout` while the app is backgrounded, so the inter-attempt sleep below would
+ * never fire there — a first attempt that comes back `unknown` (a normal, healthy
+ * outcome, not a failure) would otherwise wedge this call forever. Backgrounded, this
+ * makes exactly one attempt and never sleeps; foregrounded behavior is unchanged.
+ */
 export async function resolveForegroundAppWithRetry(
   attempts = 3,
   delayMs = 200,
+  backgrounded: boolean,
 ): Promise<ForegroundAppInfo> {
   let last: ForegroundAppInfo = {
     packageName: 'unknown',
@@ -152,12 +161,13 @@ export async function resolveForegroundAppWithRetry(
     source: 'none',
   };
 
-  for (let i = 0; i < attempts; i++) {
+  const effectiveAttempts = backgrounded ? 1 : attempts;
+  for (let i = 0; i < effectiveAttempts; i++) {
     last = await resolveForegroundApp();
     if (last.packageName !== 'unknown') {
       return last;
     }
-    if (i < attempts - 1) {
+    if (!backgrounded && i < effectiveAttempts - 1) {
       await new Promise((resolve) => setTimeout(resolve, delayMs));
     }
   }
