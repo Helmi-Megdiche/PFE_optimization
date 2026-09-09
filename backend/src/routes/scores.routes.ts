@@ -9,6 +9,8 @@ import {
 import { query } from '../db/pool';
 import { getChildLevel, getChildPoints } from '../services/gamificationService';
 import { logger } from '../utils/logger';
+import { env } from '../config/env';
+import { toScoreDateString } from '../scoring/aggregateUsage';
 
 const router = Router();
 
@@ -78,6 +80,10 @@ router.get(
     const { days } = req.query as unknown as { days: number };
 
     try {
+      // ALL_IS_FIXED #10 (S10): CURRENT_DATE is evaluated in the DB session's TimeZone, not
+      // the app's configured zone. score_date is already a bare DATE, so no AT TIME ZONE
+      // conversion belongs here - only "today" needs to be computed in the right zone.
+      const todayInZone = toScoreDateString(new Date(), env.appTimezone);
       const { rows } = await query<DailyScoreRow>(
         `SELECT id, child_id, score_date, addiction_score, wellbeing_score,
                 intensity, compulsivity, night_usage, escalation, real_imbalance,
@@ -85,9 +91,9 @@ router.get(
                 family_interaction, created_at
          FROM daily_scores
          WHERE child_id = $1
-           AND score_date >= (CURRENT_DATE - $2::int)
+           AND score_date >= ($2::date - $3::int)
          ORDER BY score_date ASC`,
-        [childId, days],
+        [childId, todayInZone, days],
       );
 
       res.json({
