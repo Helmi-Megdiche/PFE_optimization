@@ -1,6 +1,7 @@
 import cron from 'node-cron';
 import { query } from '../db/pool';
 import { logger } from '../utils/logger';
+import { env } from '../config/env';
 import {
   aggregateSessionsForDay,
   buildDailyStats,
@@ -39,14 +40,15 @@ interface UsageSessionRow extends UsageSessionRecord {
 async function fetchSessionsForDate(
   childId: string,
   scoreDate: string,
+  timeZone: string,
 ): Promise<UsageSessionRow[]> {
   const { rows } = await query<UsageSessionRow>(
     `SELECT start_time, end_time, app_category
      FROM usage_sessions
      WHERE child_id = $1
-       AND start_time >= $2::date
-       AND start_time < ($2::date + INTERVAL '1 day')`,
-    [childId, scoreDate],
+       AND start_time >= ($2::date::timestamp AT TIME ZONE $3)
+       AND start_time < (($2::date + 1)::timestamp AT TIME ZONE $3)`,
+    [childId, scoreDate, timeZone],
   );
   return rows;
 }
@@ -54,8 +56,9 @@ async function fetchSessionsForDate(
 async function totalMinutesForDate(
   childId: string,
   scoreDate: string,
+  timeZone: string,
 ): Promise<number> {
-  const sessions = await fetchSessionsForDate(childId, scoreDate);
+  const sessions = await fetchSessionsForDate(childId, scoreDate, timeZone);
   return sessions.reduce(
     (sum, s) => sum + sessionDurationMinutes(s.start_time, s.end_time),
     0,
@@ -65,16 +68,17 @@ async function totalMinutesForDate(
 export async function computeAndStoreDailyScore(
   childId: string,
   scoreDate: Date,
+  timeZone: string = env.appTimezone,
 ): Promise<{ addictionScore: number; wellbeingScore: number }> {
-  const dateStr = toScoreDateString(scoreDate);
+  const dateStr = toScoreDateString(scoreDate, timeZone);
 
-  const sessions = await fetchSessionsForDate(childId, dateStr);
-  const dayAggregate = aggregateSessionsForDay(sessions);
+  const sessions = await fetchSessionsForDate(childId, dateStr, timeZone);
+  const dayAggregate = aggregateSessionsForDay(sessions, timeZone);
 
   const compareDate = new Date(scoreDate);
   compareDate.setUTCDate(compareDate.getUTCDate() - 7);
-  const compareStr = toScoreDateString(compareDate);
-  const lastWeekMinutes = await totalMinutesForDate(childId, compareStr);
+  const compareStr = toScoreDateString(compareDate, timeZone);
+  const lastWeekMinutes = await totalMinutesForDate(childId, compareStr, timeZone);
   const wow = weekOverWeekChangePercent(
     dayAggregate.totalScreenMinutes,
     lastWeekMinutes,
@@ -86,9 +90,10 @@ export async function computeAndStoreDailyScore(
     familyCallsMessages,
     recommendedScreenMinutes,
   ] = await Promise.all([
-    fetchPhysicalActivityMinutes(childId, scoreDate),
+    fetchPhysicalActivityMinutes(childId, scoreDate, timeZone),
+    // S5 deliberately stays UTC — see wellbeingProxies.ts. Do not pass timeZone here.
     fetchBedtimeVarianceMinutes(childId, scoreDate),
-    fetchFamilyInteractionCount(childId, scoreDate),
+    fetchFamilyInteractionCount(childId, scoreDate, timeZone),
     fetchRecommendedScreenMinutes(childId),
   ]);
 
@@ -173,11 +178,15 @@ export async function computeAndStoreDailyScore(
   };
 }
 
-/** Process all children for the previous calendar day (UTC). */
+/**
+ * Process all children for the previous calendar day in the configured zone
+ * (ALL_IS_FIXED #10 — `env.appTimezone`, Africa/Tunis by default). Tunisia has no DST
+ * (fixed UTC+1 year-round, confirmed against this Postgres' tz database), so subtracting
+ * exactly 24h from "now" always lands on the previous local calendar date regardless of
+ * what local time "now" is.
+ */
 export async function runDailyScoreJob(): Promise<void> {
-  const yesterday = new Date();
-  yesterday.setUTCDate(yesterday.getUTCDate() - 1);
-  yesterday.setUTCHours(0, 0, 0, 0);
+  const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
 
   const { rows: children } = await query<ChildRow>(
     `SELECT id FROM children`,
@@ -185,12 +194,12 @@ export async function runDailyScoreJob(): Promise<void> {
 
   logger.info('Starting daily score job', {
     childCount: children.length,
-    scoreDate: toScoreDateString(yesterday),
+    scoreDate: toScoreDateString(yesterday, env.appTimezone),
   });
 
   for (const child of children) {
     try {
-      const scores = await computeAndStoreDailyScore(child.id, yesterday);
+      const scores = await computeAndStoreDailyScore(child.id, yesterday, env.appTimezone);
 
       try {
         if (scores.wellbeingScore < 40) {
@@ -214,14 +223,19 @@ export async function runDailyScoreJob(): Promise<void> {
   }
 }
 
-/** Schedule at 01:00 every day (server local timezone). */
+/** Schedule at 01:00 every day in the configured zone (ALL_IS_FIXED #10 — no longer the
+ *  server process's local zone, so the fire time stops depending on the host). */
 export function scheduleDailyScoreJob(): void {
-  cron.schedule('0 1 * * *', () => {
-    void runDailyScoreJob().catch((err) => {
-      logger.error('Daily score cron failed', {
-        err: err instanceof Error ? err.message : String(err),
+  cron.schedule(
+    '0 1 * * *',
+    () => {
+      void runDailyScoreJob().catch((err) => {
+        logger.error('Daily score cron failed', {
+          err: err instanceof Error ? err.message : String(err),
+        });
       });
-    });
-  });
-  logger.info('Daily score cron scheduled (01:00 daily)');
+    },
+    { timezone: env.appTimezone },
+  );
+  logger.info('Daily score cron scheduled (01:00 daily)', { timezone: env.appTimezone });
 }

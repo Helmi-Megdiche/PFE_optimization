@@ -1,4 +1,5 @@
 import { query } from '../db/pool';
+import { env } from '../config/env';
 import { toScoreDateString } from './aggregateUsage';
 
 const DEFAULT_BEDTIME_VARIANCE_MINUTES = 30;
@@ -11,8 +12,9 @@ const MINUTES_PER_PHYSICAL_MISSION = 10;
 export async function fetchPhysicalActivityMinutes(
   childId: string,
   scoreDate: Date,
+  timeZone: string = env.appTimezone,
 ): Promise<number> {
-  const dateStr = toScoreDateString(scoreDate);
+  const dateStr = toScoreDateString(scoreDate, timeZone);
   const { rows } = await query<{ count: string }>(
     `SELECT COUNT(*)::text AS count
      FROM missions
@@ -23,9 +25,9 @@ export async function fetchPhysicalActivityMinutes(
          metadata->>'templateKey' = 'physical_activity'
          OR metadata->>'action' IN ('jumping_jacks', 'outdoor', 'sport', 'physical_activity')
        )
-       AND completed_at >= $2::date
-       AND completed_at < ($2::date + INTERVAL '1 day')`,
-    [childId, dateStr],
+       AND completed_at >= ($2::date::timestamp AT TIME ZONE $3)
+       AND completed_at < (($2::date + 1)::timestamp AT TIME ZONE $3)`,
+    [childId, dateStr, timeZone],
   );
   const count = Number(rows[0]?.count ?? 0);
   return Math.min(count * MINUTES_PER_PHYSICAL_MISSION, MAX_PHYSICAL_ACTIVITY_MINUTES);
@@ -34,12 +36,20 @@ export async function fetchPhysicalActivityMinutes(
 /**
  * Stddev of daily last-session end times over the 7-day window ending score date.
  * Falls back to 30 minutes when insufficient data.
+ *
+ * ALL_IS_FIXED #10 — deliberately stays UTC (F6 option 1), NOT the configured app
+ * timezone. This metric is a STDDEV over seconds-since-local-midnight and is wrap-sensitive:
+ * converting to Africa/Tunis would move the wrap discontinuity to exactly the most common
+ * real bedtime (local midnight), turning a perfectly regular sleeper into a ~1400-minute
+ * variance that clamps to the ceiling and scores sleepConsistency = 0 — worse than today.
+ * `toScoreDateString(scoreDate, 'UTC')` is explicit so this label always agrees with the
+ * UTC window below, even though `toScoreDateString`'s own default is now Africa/Tunis.
  */
 export async function fetchBedtimeVarianceMinutes(
   childId: string,
   scoreDate: Date,
 ): Promise<number> {
-  const dateStr = toScoreDateString(scoreDate);
+  const dateStr = toScoreDateString(scoreDate, 'UTC');
   const { rows } = await query<{ variance_seconds: string | null }>(
     `SELECT STDDEV(
        EXTRACT(EPOCH FROM (daily_end AT TIME ZONE 'UTC')::time)
@@ -70,8 +80,9 @@ export async function fetchBedtimeVarianceMinutes(
 export async function fetchFamilyInteractionCount(
   childId: string,
   scoreDate: Date,
+  timeZone: string = env.appTimezone,
 ): Promise<number> {
-  const dateStr = toScoreDateString(scoreDate);
+  const dateStr = toScoreDateString(scoreDate, timeZone);
   const { rows } = await query<{ count: string }>(
     `SELECT COUNT(*)::text AS count
      FROM missions
@@ -85,9 +96,9 @@ export async function fetchFamilyInteractionCount(
            'board_game', 'discussion', 'parent_discussion', 'kind_message'
          )
        )
-       AND completed_at >= $2::date
-       AND completed_at < ($2::date + INTERVAL '1 day')`,
-    [childId, dateStr],
+       AND completed_at >= ($2::date::timestamp AT TIME ZONE $3)
+       AND completed_at < (($2::date + 1)::timestamp AT TIME ZONE $3)`,
+    [childId, dateStr, timeZone],
   );
   return Number(rows[0]?.count ?? 0);
 }

@@ -9,6 +9,7 @@ import {
 import {
   aggregateSessionsForDay,
   nightMinutesInSession,
+  toScoreDateString,
   weekOverWeekChangePercent,
 } from '../src/scoring/aggregateUsage';
 
@@ -156,5 +157,51 @@ describe('aggregateUsage helpers', () => {
   it('weekOverWeekChangePercent handles zero baseline', () => {
     expect(weekOverWeekChangePercent(60, 0)).toBe(100);
     expect(weekOverWeekChangePercent(0, 0)).toBe(0);
+  });
+});
+
+// ALL_IS_FIXED #10 — discriminating pairs for the Africa/Tunis timezone fix (A1).
+// These must be RED on the unmodified tree (nightMinutesInSession/toScoreDateString
+// still hardcode UTC and ignore the timeZone argument) and GREEN after the fix.
+describe('nightMinutesInSession — timezone-corrected night window', () => {
+  it('counts 21:00-22:00Z as night in Africa/Tunis (22:00-23:00 local), not in UTC', () => {
+    const night = nightMinutesInSession(
+      '2026-01-10T21:00:00.000Z',
+      '2026-01-10T22:00:00.000Z',
+      'Africa/Tunis',
+    );
+    expect(night).toBeCloseTo(60, 0);
+  });
+
+  it('does not count 05:00-06:00Z as night in Africa/Tunis (06:00-07:00 local), unlike UTC', () => {
+    const night = nightMinutesInSession(
+      '2026-01-10T05:00:00.000Z',
+      '2026-01-10T06:00:00.000Z',
+      'Africa/Tunis',
+    );
+    expect(night).toBeCloseTo(0, 0);
+  });
+
+  it('control: 22:00-23:00Z (23:00-00:00 local) is night under both rules', () => {
+    const night = nightMinutesInSession(
+      '2026-01-10T22:00:00.000Z',
+      '2026-01-10T23:00:00.000Z',
+      'Africa/Tunis',
+    );
+    expect(night).toBeCloseTo(60, 0);
+  });
+});
+
+describe('toScoreDateString — timezone-corrected calendar date', () => {
+  it('renders 23:30Z as the next local calendar day in Africa/Tunis', () => {
+    expect(toScoreDateString(new Date('2026-09-07T23:30:00.000Z'), 'Africa/Tunis')).toBe(
+      '2026-09-08',
+    );
+  });
+
+  it('control: 12:00Z is the same calendar day in both UTC and Africa/Tunis', () => {
+    expect(toScoreDateString(new Date('2026-09-07T12:00:00.000Z'), 'Africa/Tunis')).toBe(
+      '2026-09-07',
+    );
   });
 });

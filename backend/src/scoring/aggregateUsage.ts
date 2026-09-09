@@ -8,6 +8,12 @@ export interface UsageSessionRecord {
 
 const EDUCATIONAL_CATEGORIES = new Set(['educational', 'creative']);
 
+/** ALL_IS_FIXED #10: default zone for local-day/night-window calculations, matching env.ts's
+ *  default. Kept as a literal here (not imported from config) so this module stays a pure,
+ *  dependency-free scoring function that tests can drive without touching env — production
+ *  call sites thread `env.appTimezone` through explicitly instead of relying on this default. */
+const DEFAULT_TIMEZONE = 'Africa/Tunis';
+
 function toDate(value: Date | string): Date {
   return value instanceof Date ? value : new Date(value);
 }
@@ -22,20 +28,29 @@ export function sessionDurationMinutes(
   return ms > 0 ? ms / 60_000 : 0;
 }
 
-/** Minutes of a session that fall in 22:00–06:00 UTC. */
+/** Minutes of a session that fall in 22:00–06:00 local time in `timeZone` (default Africa/Tunis). */
 export function nightMinutesInSession(
   start: Date | string,
   end: Date | string,
+  timeZone: string = DEFAULT_TIMEZONE,
 ): number {
   const s = toDate(start);
   const e = toDate(end);
   if (e <= s) return 0;
 
+  // Constructed once outside the per-minute loop below — constructing an Intl formatter
+  // per minute is a real cost on a long session.
+  const hourFormatter = new Intl.DateTimeFormat('en-GB', {
+    timeZone,
+    hourCycle: 'h23',
+    hour: 'numeric',
+  });
+
   let night = 0;
   const cursor = new Date(s);
 
   while (cursor < e) {
-    const hour = cursor.getUTCHours();
+    const hour = Number(hourFormatter.format(cursor));
     const isNight = hour >= 22 || hour < 6;
 
     const next = new Date(cursor);
@@ -52,6 +67,7 @@ export function nightMinutesInSession(
 
 export function aggregateSessionsForDay(
   sessions: UsageSessionRecord[],
+  timeZone: string = DEFAULT_TIMEZONE,
 ): Pick<
   WellbeingStats,
   | 'totalScreenMinutes'
@@ -66,7 +82,7 @@ export function aggregateSessionsForDay(
   for (const row of sessions) {
     const mins = sessionDurationMinutes(row.start_time, row.end_time);
     totalScreenMinutes += mins;
-    nightMinutes += nightMinutesInSession(row.start_time, row.end_time);
+    nightMinutes += nightMinutesInSession(row.start_time, row.end_time, timeZone);
 
     const category = (row.app_category ?? 'unknown').toLowerCase();
     if (EDUCATIONAL_CATEGORIES.has(category)) {
@@ -112,8 +128,13 @@ export function weekOverWeekChangePercent(
   return ((currentDayMinutes - sameDayLastWeekMinutes) / sameDayLastWeekMinutes) * 100;
 }
 
-export function toScoreDateString(date: Date): string {
-  return date.toISOString().slice(0, 10);
+export function toScoreDateString(date: Date, timeZone: string = DEFAULT_TIMEZONE): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(date);
 }
 
 export function addictionStatsFromWellbeing(stats: WellbeingStats): DailyUsageStats {

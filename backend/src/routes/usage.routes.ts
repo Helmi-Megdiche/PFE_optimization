@@ -9,6 +9,8 @@ import { validateBody, validateQuery } from '../middleware/validate';
 import { postUsageSchema, listUsageQuerySchema } from '../validators/usage.validator';
 import { query } from '../db/pool';
 import { logger } from '../utils/logger';
+import { env } from '../config/env';
+import { toScoreDateString } from '../scoring/aggregateUsage';
 
 const router = Router();
 
@@ -82,17 +84,17 @@ router.get(
     const { childId } = req.params;
     const { date } = req.query as { date?: string };
 
-    const day = date ?? new Date().toISOString().slice(0, 10);
+    const day = date ?? toScoreDateString(new Date(), env.appTimezone);
 
     try {
       const { rows } = await query<UsageSessionRow>(
         `SELECT id, child_id, start_time, end_time, app_package, app_category, created_at
          FROM usage_sessions
          WHERE child_id = $1
-           AND start_time >= $2::date
-           AND start_time < ($2::date + INTERVAL '1 day')
+           AND start_time >= ($2::date::timestamp AT TIME ZONE $3)
+           AND start_time < (($2::date + 1)::timestamp AT TIME ZONE $3)
          ORDER BY start_time ASC`,
-        [childId, day],
+        [childId, day, env.appTimezone],
       );
 
       res.json({
