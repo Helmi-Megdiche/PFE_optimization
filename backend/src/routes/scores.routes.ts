@@ -33,9 +33,28 @@ interface DailyScoreRow {
   created_at: string;
 }
 
+/**
+ * ALL_IS_FIXED #10 (S9/F5, confirmed via Q4): node-postgres parses a DATE column into a
+ * JS Date at LOCAL midnight. On a UTC+1 host, `.toISOString().slice(0,10)` renders that
+ * Date one calendar day early (e.g. 2026-08-24 -> "2026-08-23"). Build the string from the
+ * Date's own local getters instead - that's how pg constructed it, so this is the narrow,
+ * no-behaviour-change-elsewhere fix (as opposed to a global pg.types.setTypeParser(1082, ...)
+ * override, which would silently touch every DATE column in the repo).
+ */
+/**
+ * ALL_IS_FIXED #10 (S9/F5, confirmed via Q4): node-postgres parses a DATE column into a
+ * JS Date at LOCAL midnight. On a UTC+1 host, `.toISOString().slice(0,10)` renders that
+ * Date one calendar day early (e.g. 2026-08-24 -> "2026-08-23"). Build the string from the
+ * Date's own local getters instead - that's how pg constructed it, so this is the narrow,
+ * no-behaviour-change-elsewhere fix (as opposed to a global pg.types.setTypeParser(1082, ...)
+ * override, which would silently touch every DATE column in the repo).
+ */
 function formatScoreDate(scoreDate: string | Date): string {
   if (scoreDate instanceof Date) {
-    return scoreDate.toISOString().slice(0, 10);
+    const year = scoreDate.getFullYear();
+    const month = String(scoreDate.getMonth() + 1).padStart(2, '0');
+    const day = String(scoreDate.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
   }
   return String(scoreDate).slice(0, 10);
 }
