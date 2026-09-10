@@ -25,7 +25,10 @@ function getModule(): NsfwTfliteNative {
 }
 
 export async function initNsfwModel(): Promise<void> {
-  await getModule().initModel();
+  const loaded = await getModule().initModel();
+  if (!loaded) {
+    throw new Error('NsfwTflite.initModel() resolved falsy — model not loaded');
+  }
 }
 
 export async function isNsfwModelLoaded(): Promise<boolean> {
