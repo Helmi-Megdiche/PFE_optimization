@@ -270,6 +270,17 @@ export function createCaptureCoordinator(deps: CaptureCoordinatorDeps) {
     return reason;
   }
 
+  /**
+   * Non-mutating peek at the coalesced pending request — mirrors isForceArmed().
+   * Lets the deferred-frame handoff in useScreenshotCapture.ts know whether a
+   * pending reason exists (to feed the pure decideDeferredFrameHandoff) without
+   * consuming it ahead of the actual dispatch — only the dispatch branch that
+   * is actually taken should call takePendingReason().
+   */
+  function peekPendingReason(): CaptureReason | null {
+    return pendingReason;
+  }
+
   /** Clears all state — called on stop-monitoring and monitoring (re)start. */
   function reset(): void {
     lastAcceptedAtMs = Number.NEGATIVE_INFINITY;
@@ -286,6 +297,7 @@ export function createCaptureCoordinator(deps: CaptureCoordinatorDeps) {
     isForceArmed,
     setKeyboardVisible,
     takePendingReason,
+    peekPendingReason,
     reset,
   };
 }

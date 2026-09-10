@@ -1,6 +1,7 @@
 import {
   computeAdaptiveIntervalMs,
   computeEffectiveAdaptiveInterval,
+  decideDeferredFrameHandoff,
   decideScrollSettle,
   decideTickAction,
   initialScrollSettleState,
@@ -24,7 +25,11 @@ import {
  * spacing (ms) between the ticks that passed. Mirrors the hook's tick handler:
  * `lastPass` only advances on a pass.
  */
-function realizedSpacings(tickMs: number, targetMs: number, ticks = 120): number[] {
+function realizedSpacings(
+  tickMs: number,
+  targetMs: number,
+  ticks = 120,
+): number[] {
   let lastPass = 0; // seed at 0 (not -Infinity) so we measure steady-state spacing
   const passAt: number[] = [];
   for (let k = 1; k <= ticks; k++) {
@@ -47,7 +52,9 @@ describe('adaptiveCapture', () => {
   });
 
   it('uses 15s interval when average risk is 30-70', () => {
-    expect(computeAdaptiveIntervalMs([40, 50, 45])).toBe(RISK_INTERVAL_MEDIUM_MS);
+    expect(computeAdaptiveIntervalMs([40, 50, 45])).toBe(
+      RISK_INTERVAL_MEDIUM_MS,
+    );
   });
 
   it('uses 20s interval when average risk < 30', () => {
@@ -92,17 +99,17 @@ describe('adaptiveCapture', () => {
   });
 
   it('computeEffectiveAdaptiveInterval floors education at 120s', () => {
-    expect(
-      computeEffectiveAdaptiveInterval([85, 90, 80], 'com.duolingo'),
-    ).toBe(120_000);
+    expect(computeEffectiveAdaptiveInterval([85, 90, 80], 'com.duolingo')).toBe(
+      120_000,
+    );
   });
 });
 
 describe('shouldEmitPeriodicCapture (native-tick subsample gate)', () => {
   it('never passes when the target interval is 0 (category disables periodic)', () => {
-    expect(shouldEmitPeriodicCapture(1_000_000, Number.NEGATIVE_INFINITY, 0)).toBe(
-      false,
-    );
+    expect(
+      shouldEmitPeriodicCapture(1_000_000, Number.NEGATIVE_INFINITY, 0),
+    ).toBe(false);
   });
 
   it('never passes for a negative target', () => {
@@ -123,7 +130,11 @@ describe('shouldEmitPeriodicCapture (native-tick subsample gate)', () => {
 
   it('the first tick always passes (lastPassAt = -Infinity)', () => {
     expect(
-      shouldEmitPeriodicCapture(0, Number.NEGATIVE_INFINITY, RISK_INTERVAL_LOW_MS),
+      shouldEmitPeriodicCapture(
+        0,
+        Number.NEGATIVE_INFINITY,
+        RISK_INTERVAL_LOW_MS,
+      ),
     ).toBe(true);
   });
 
@@ -146,13 +157,16 @@ describe('native-tick subsample realizes each target exactly (A3c-2 quantization
     [RISK_INTERVAL_MEDIUM_MS],
     [RISK_INTERVAL_LOW_MS],
     [120_000],
-  ])('a %ims target is realized with exact %ims spacing on the 5s tick', (target) => {
-    const gaps = realizedSpacings(NATIVE_TICK_INTERVAL_MS, target);
-    expect(gaps.length).toBeGreaterThan(2);
-    for (const gap of gaps) {
-      expect(gap).toBe(target);
-    }
-  });
+  ])(
+    'a %ims target is realized with exact %ims spacing on the 5s tick',
+    target => {
+      const gaps = realizedSpacings(NATIVE_TICK_INTERVAL_MS, target);
+      expect(gaps.length).toBeGreaterThan(2);
+      for (const gap of gaps) {
+        expect(gap).toBe(target);
+      }
+    },
+  );
 
   it('permanent guard: a 10s tick CANNOT realize a 15s target — it quantizes up to 20s (the shipped A3c-2 bug)', () => {
     const gaps = realizedSpacings(10_000, RISK_INTERVAL_MEDIUM_MS);
@@ -377,7 +391,13 @@ describe('shouldForceReleasePhase (D1: backgrounded-safe per-phase deadline)', (
     'boundary pair: %s does not fire at deadline-1ms, fires at deadline',
     (phase, deadline) => {
       expect(
-        shouldForceReleasePhase(phase, 1_000, 1_000 + deadline - 1, 1_000, true),
+        shouldForceReleasePhase(
+          phase,
+          1_000,
+          1_000 + deadline - 1,
+          1_000,
+          true,
+        ),
       ).toBe(false);
       expect(
         shouldForceReleasePhase(phase, 1_000, 1_000 + deadline, 1_000, true),
@@ -386,8 +406,8 @@ describe('shouldForceReleasePhase (D1: backgrounded-safe per-phase deadline)', (
   );
 
   it('every non-null PHASE_DEADLINE_MS value is a whole multiple of NATIVE_TICK_INTERVAL_MS, exceeds its withTimeout budget, and stays under OCR_LOCK_LIVENESS_MS', () => {
-    const budgetMs = { foreground_lookup: 2_500, api_post: 12_000 } as const;
-    (['foreground_lookup', 'api_post'] as const).forEach((phase) => {
+    const budgetMs = {foreground_lookup: 2_500, api_post: 12_000} as const;
+    (['foreground_lookup', 'api_post'] as const).forEach(phase => {
       const deadline = PHASE_DEADLINE_MS[phase];
       expect(deadline).not.toBeNull();
       expect(deadline! % NATIVE_TICK_INTERVAL_MS).toBe(0);
@@ -572,9 +592,13 @@ describe('decideTickAction — phase timeout composition (D1)', () => {
 
 describe('recordScrollEvent', () => {
   it('stamps lastScrollAtMs, arms, and preserves lastEmitAtMs', () => {
-    const s0 = { ...initialScrollSettleState(), lastEmitAtMs: 4_000 };
+    const s0 = {...initialScrollSettleState(), lastEmitAtMs: 4_000};
     const s1 = recordScrollEvent(s0, 9_000);
-    expect(s1).toEqual({ lastScrollAtMs: 9_000, armed: true, lastEmitAtMs: 4_000 });
+    expect(s1).toEqual({
+      lastScrollAtMs: 9_000,
+      armed: true,
+      lastEmitAtMs: 4_000,
+    });
   });
 });
 
@@ -589,12 +613,12 @@ describe('decideScrollSettle (tick-driven scroll settle, A3c-3)', () => {
 
   it('does not emit when not armed, state unchanged', () => {
     const state = initialScrollSettleState();
-    const out = decideScrollSettle({ ...base, state, nowMs: 1_000_000 });
-    expect(out).toEqual({ emit: false, state });
+    const out = decideScrollSettle({...base, state, nowMs: 1_000_000});
+    expect(out).toEqual({emit: false, state});
   });
 
   it('does not emit while still scrolling (last scroll < settleMs ago), stays armed', () => {
-    const state = { lastScrollAtMs: 100_000, armed: true, lastEmitAtMs: 0 };
+    const state = {lastScrollAtMs: 100_000, armed: true, lastEmitAtMs: 0};
     const out = decideScrollSettle({
       ...base,
       state,
@@ -606,9 +630,9 @@ describe('decideScrollSettle (tick-driven scroll settle, A3c-3)', () => {
   });
 
   it('emits once settled with no periodic recency and no cooldown; disarms and stamps lastEmitAtMs', () => {
-    const state = { lastScrollAtMs: 100_000, armed: true, lastEmitAtMs: 0 };
+    const state = {lastScrollAtMs: 100_000, armed: true, lastEmitAtMs: 0};
     const now = 100_000 + SCROLL_SETTLE_MS;
-    const out = decideScrollSettle({ ...base, state, nowMs: now });
+    const out = decideScrollSettle({...base, state, nowMs: now});
     expect(out.emit).toBe(true);
     expect(out.state).toEqual({
       armed: false,
@@ -618,7 +642,7 @@ describe('decideScrollSettle (tick-driven scroll settle, A3c-3)', () => {
   });
 
   it('disarms without emitting when the category disables periodic (periodicIntervalMs = 0)', () => {
-    const state = { lastScrollAtMs: 100_000, armed: true, lastEmitAtMs: 0 };
+    const state = {lastScrollAtMs: 100_000, armed: true, lastEmitAtMs: 0};
     const out = decideScrollSettle({
       ...base,
       state,
@@ -630,7 +654,7 @@ describe('decideScrollSettle (tick-driven scroll settle, A3c-3)', () => {
   });
 
   it('DEFERS (stays armed, no emit) when a periodic frame fired within periodicGuardMs — flaw 1', () => {
-    const state = { lastScrollAtMs: 100_000, armed: true, lastEmitAtMs: 0 };
+    const state = {lastScrollAtMs: 100_000, armed: true, lastEmitAtMs: 0};
     const now = 100_000 + SCROLL_SETTLE_MS + 3_000;
     const out = decideScrollSettle({
       ...base,
@@ -644,7 +668,7 @@ describe('decideScrollSettle (tick-driven scroll settle, A3c-3)', () => {
   });
 
   it('emits once the periodic frame is older than periodicGuardMs', () => {
-    const state = { lastScrollAtMs: 100_000, armed: true, lastEmitAtMs: 0 };
+    const state = {lastScrollAtMs: 100_000, armed: true, lastEmitAtMs: 0};
     const now = 100_000 + SCROLL_SETTLE_MS + 3_000;
     const out = decideScrollSettle({
       ...base,
@@ -656,24 +680,24 @@ describe('decideScrollSettle (tick-driven scroll settle, A3c-3)', () => {
   });
 
   it('DEFERS (stays armed) when settled but still inside the cooldown — defer, not drop (flaw 3)', () => {
-    const state = { lastScrollAtMs: 100_000, armed: true, lastEmitAtMs: 95_000 };
+    const state = {lastScrollAtMs: 100_000, armed: true, lastEmitAtMs: 95_000};
     const now = 100_000 + SCROLL_SETTLE_MS; // settled, but 7s since last emit < 10s cooldown
-    const out = decideScrollSettle({ ...base, state, nowMs: now });
+    const out = decideScrollSettle({...base, state, nowMs: now});
     expect(out.emit).toBe(false);
     expect(out.state.armed).toBe(true);
     expect(out.state.lastEmitAtMs).toBe(95_000);
   });
 
   it('emits once the cooldown has expired (deferral resolves on a later tick)', () => {
-    const state = { lastScrollAtMs: 100_000, armed: true, lastEmitAtMs: 95_000 };
+    const state = {lastScrollAtMs: 100_000, armed: true, lastEmitAtMs: 95_000};
     const now = 95_000 + SCROLL_SETTLE_COOLDOWN_MS; // cooldown boundary
-    const out = decideScrollSettle({ ...base, state, nowMs: now });
+    const out = decideScrollSettle({...base, state, nowMs: now});
     expect(out.emit).toBe(true);
     expect(out.state.lastEmitAtMs).toBe(now);
   });
 
   it('cooldown boundary: === cooldownMs emits (strict <), cooldownMs - 1 defers', () => {
-    const state = { lastScrollAtMs: 0, armed: true, lastEmitAtMs: 50_000 };
+    const state = {lastScrollAtMs: 0, armed: true, lastEmitAtMs: 50_000};
     const atBoundary = decideScrollSettle({
       ...base,
       state,
@@ -690,13 +714,13 @@ describe('decideScrollSettle (tick-driven scroll settle, A3c-3)', () => {
   });
 
   it('first emit ignores the cooldown check when lastEmitAtMs is 0', () => {
-    const state = { lastScrollAtMs: 0, armed: true, lastEmitAtMs: 0 };
-    const out = decideScrollSettle({ ...base, state, nowMs: 3_000 });
+    const state = {lastScrollAtMs: 0, armed: true, lastEmitAtMs: 0};
+    const out = decideScrollSettle({...base, state, nowMs: 3_000});
     expect(out.emit).toBe(true);
   });
 
   it('education-scale cooldown (120s) defers every settle across the 10-119s window', () => {
-    const state = { lastScrollAtMs: 0, armed: true, lastEmitAtMs: 10_000 };
+    const state = {lastScrollAtMs: 0, armed: true, lastEmitAtMs: 10_000};
     for (const dt of [10_000, 30_000, 60_000, 119_000]) {
       const out = decideScrollSettle({
         ...base,
@@ -721,10 +745,106 @@ describe('decideScrollSettle (tick-driven scroll settle, A3c-3)', () => {
     for (let k = 1; k <= 12; k++) {
       const now = k * NATIVE_TICK_INTERVAL_MS;
       state = recordScrollEvent(state, now); // a scroll landed this tick
-      const out = decideScrollSettle({ ...base, state, nowMs: now });
+      const out = decideScrollSettle({...base, state, nowMs: now});
       expect(out.emit).toBe(false);
       state = out.state;
     }
     expect(state.armed).toBe(true);
+  });
+});
+
+describe('decideDeferredFrameHandoff (ALL_IS_FIXED #12, C1: generation-guarded deferred-frame handoff)', () => {
+  const base = {
+    isOwnGeneration: true,
+    hasDeferredFrame: false,
+    isProcessing: false,
+    isMonitoring: true,
+    missionPaused: false,
+    hasPendingReason: false,
+  };
+
+  it('case 1: dispatches the deferred frame when free, monitoring, and not mission-paused', () => {
+    expect(decideDeferredFrameHandoff({...base, hasDeferredFrame: true})).toBe(
+      'processDeferredFrame',
+    );
+  });
+
+  it('case 2 (the defect, both halves at once): a stale generation must not steal a deferred frame while the live successor is processing, nor fall through and steal the pending reason', () => {
+    expect(
+      decideDeferredFrameHandoff({
+        ...base,
+        isOwnGeneration: false,
+        hasDeferredFrame: true,
+        isProcessing: true,
+        hasPendingReason: true,
+      }),
+    ).toBe('none');
+  });
+
+  it('case 3 (the defect): a stale generation must not steal a deferred frame even when nothing else is in flight', () => {
+    expect(
+      decideDeferredFrameHandoff({
+        ...base,
+        isOwnGeneration: false,
+        hasDeferredFrame: true,
+      }),
+    ).toBe('none');
+  });
+
+  it('case 4 (the defect): a stale generation must not steal a bare pending reason with no deferred frame involved', () => {
+    expect(
+      decideDeferredFrameHandoff({
+        ...base,
+        isOwnGeneration: false,
+        hasPendingReason: true,
+      }),
+    ).toBe('none');
+  });
+
+  it('case 5: triggers the coalesced pending reason when there is no deferred frame', () => {
+    expect(decideDeferredFrameHandoff({...base, hasPendingReason: true})).toBe(
+      'triggerPendingReason',
+    );
+  });
+
+  it('case 6: not monitoring suppresses the deferred-frame dispatch', () => {
+    expect(
+      decideDeferredFrameHandoff({
+        ...base,
+        hasDeferredFrame: true,
+        isMonitoring: false,
+      }),
+    ).toBe('none');
+  });
+
+  it('case 7a: mission-paused suppresses the deferred-frame dispatch, nothing else pending', () => {
+    expect(
+      decideDeferredFrameHandoff({
+        ...base,
+        hasDeferredFrame: true,
+        missionPaused: true,
+      }),
+    ).toBe('none');
+  });
+
+  it('case 7b (preserved pre-existing quirk): mission-paused blocks the frame-dispatch branch specifically, but the pending-reason branch has no mission-pause check, in both old and new code — harmless, since processCapturedFrame itself skips on isMissionCapturePaused() downstream', () => {
+    expect(
+      decideDeferredFrameHandoff({
+        ...base,
+        hasDeferredFrame: true,
+        missionPaused: true,
+        hasPendingReason: true,
+      }),
+    ).toBe('triggerPendingReason');
+  });
+
+  it("case 8 (disclosed behavior delta): a pending reason survives, unconsumed, while not monitoring — previously it was silently discarded by the old code's unconditional takePendingReason() call", () => {
+    expect(
+      decideDeferredFrameHandoff({
+        ...base,
+        isMonitoring: false,
+        hasPendingReason: true,
+      }),
+    ).toBe('none');
   });
 });

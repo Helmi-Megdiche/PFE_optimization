@@ -1,6 +1,6 @@
 /** Risk-based periodic capture intervals (Sprint 3.7 adaptive). */
 
-import { getEffectiveIntervalMs } from './appCapturePolicy';
+import {getEffectiveIntervalMs} from './appCapturePolicy';
 
 // Ordering invariant: HIGH <= MEDIUM <= LOW (higher risk must scan at least as often).
 export const RISK_INTERVAL_HIGH_MS = 10_000;
@@ -299,7 +299,7 @@ export const initialScrollSettleState = (): ScrollSettleState => ({
 export const recordScrollEvent = (
   s: ScrollSettleState,
   nowMs: number,
-): ScrollSettleState => ({ ...s, lastScrollAtMs: nowMs, armed: true });
+): ScrollSettleState => ({...s, lastScrollAtMs: nowMs, armed: true});
 
 /**
  * Tick-driven scroll-settle decision. Pure; evaluated from the native tick
@@ -326,30 +326,34 @@ export function decideScrollSettle(params: {
   cooldownMs?: number;
   /** = CAPTURE_DEBOUNCE_MS. */
   periodicGuardMs?: number;
-}): { emit: boolean; state: ScrollSettleState } {
-  const { state: s, nowMs } = params;
+}): {emit: boolean; state: ScrollSettleState} {
+  const {state: s, nowMs} = params;
   const settleMs = params.settleMs ?? SCROLL_SETTLE_MS;
   const cooldownMs = params.cooldownMs ?? SCROLL_SETTLE_COOLDOWN_MS;
   const periodicGuardMs = params.periodicGuardMs ?? 5_000;
 
   if (!s.armed) {
-    return { emit: false, state: s };
+    return {emit: false, state: s};
   }
   if (params.periodicIntervalMs <= 0) {
-    return { emit: false, state: { ...s, armed: false } };
+    return {emit: false, state: {...s, armed: false}};
   }
   if (nowMs - s.lastScrollAtMs < settleMs) {
-    return { emit: false, state: s };
+    return {emit: false, state: s};
   }
   if (nowMs - params.lastPeriodicPassAtMs <= periodicGuardMs) {
-    return { emit: false, state: s };
+    return {emit: false, state: s};
   }
   if (s.lastEmitAtMs > 0 && nowMs - s.lastEmitAtMs < cooldownMs) {
-    return { emit: false, state: s };
+    return {emit: false, state: s};
   }
   return {
     emit: true,
-    state: { armed: false, lastScrollAtMs: s.lastScrollAtMs, lastEmitAtMs: nowMs },
+    state: {
+      armed: false,
+      lastScrollAtMs: s.lastScrollAtMs,
+      lastEmitAtMs: nowMs,
+    },
   };
 }
 
@@ -371,7 +375,11 @@ export function computeAdaptiveIntervalMs(riskScores: number[]): number {
   return RISK_INTERVAL_LOW_MS;
 }
 
-export function pushRiskScore(history: number[], score: number, maxSize = RISK_HISTORY_SIZE): number[] {
+export function pushRiskScore(
+  history: number[],
+  score: number,
+  maxSize = RISK_HISTORY_SIZE,
+): number[] {
   const next = [...history, score];
   if (next.length > maxSize) {
     return next.slice(-maxSize);
@@ -392,4 +400,75 @@ export function computeEffectiveAdaptiveInterval(
     return baseInterval;
   }
   return getEffectiveIntervalMs(baseInterval, appPackage);
+}
+
+/* ------------------------------------------------------------------ *
+ *  Deferred-frame handoff generation guard (ALL_IS_FIXED #12, C1)     *
+ * ------------------------------------------------------------------ */
+
+export type DeferredFrameAction =
+  | 'processDeferredFrame'
+  | 'triggerPendingReason'
+  | 'none';
+
+/**
+ * Decides what a processCapturedFrame `finally` block should do with a
+ * deferred frame / coalesced pending reason. Pure — the caller MUST compute
+ * `isOwnGeneration` BEFORE calling this, as a real, sometimes-false value,
+ * and MUST NOT nest this call inside an `if (isOwnGeneration)` block — doing
+ * so makes the parameter trivially true and silently reintroduces the bug
+ * this function exists to fix (see ALL_IS_FIXED #12, round 1 finding).
+ *
+ * Branch order (load-bearing):
+ *   1. `!isOwnGeneration` → 'none'. The fix: a stale generation must not
+ *      dispatch the live generation's deferred frame, nor trigger (nor even
+ *      consume) the coordinator's coalesced pending reason.
+ *   2. `hasDeferredFrame && !isProcessing && isMonitoring && !missionPaused`
+ *      → 'processDeferredFrame'.
+ *   3. `hasPendingReason && isMonitoring` → 'triggerPendingReason' (reached
+ *      when branch 2 didn't fire — e.g. no deferred frame, or one exists but
+ *      is blocked by mission-pause). Deliberately does NOT check
+ *      `missionPaused` — neither did the old code's equivalent branch; this
+ *      is a preserved pre-existing quirk, not something this fix addresses.
+ *      (It costs nothing: `processCapturedFrame` itself early-returns on
+ *      `isMissionCapturePaused()`, so a pending-reason-triggered capture made
+ *      while mission-paused is requested and then skipped downstream.)
+ *   4. else → 'none'.
+ *
+ * `isOwnGeneration` alone (not this function's return value) also decides
+ * whether the caller may null `pendingFrameRef.current` — see the call site
+ * in useScreenshotCapture.ts.
+ *
+ * Note on `isProcessing`: it is tautologically `false` whenever
+ * `isOwnGeneration` is `true`, because the caller sets
+ * `isProcessingRef.current = false` in the same synchronous block, before
+ * reading it, for the own-generation case only — there is no reachable
+ * own-generation input where `isProcessing` is `true`. The parameter exists
+ * because this function also models the STALE-generation case, where it
+ * reflects whatever the actual live successor frame is doing (`true` when a
+ * live frame is mid-flight — exactly the defect case's precondition).
+ */
+export function decideDeferredFrameHandoff(params: {
+  isOwnGeneration: boolean;
+  hasDeferredFrame: boolean;
+  isProcessing: boolean;
+  isMonitoring: boolean;
+  missionPaused: boolean;
+  hasPendingReason: boolean;
+}): DeferredFrameAction {
+  if (!params.isOwnGeneration) {
+    return 'none';
+  }
+  if (
+    params.hasDeferredFrame &&
+    !params.isProcessing &&
+    params.isMonitoring &&
+    !params.missionPaused
+  ) {
+    return 'processDeferredFrame';
+  }
+  if (params.hasPendingReason && params.isMonitoring) {
+    return 'triggerPendingReason';
+  }
+  return 'none';
 }

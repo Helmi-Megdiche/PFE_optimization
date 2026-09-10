@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { AppState, Platform } from 'react-native';
+import {useCallback, useEffect, useRef, useState} from 'react';
+import {AppState, Platform} from 'react-native';
 import getScreenCaptureModule, {
   screenCaptureEmitter,
   SCREEN_CAPTURE_EVENTS,
@@ -8,15 +8,15 @@ import getScreenCaptureModule, {
   type ScreenCaptureTickEvent,
   type MonitoringRevokedEvent,
 } from '../native/ScreenCapture';
-import { keywordFilter } from '../utils/keywordFilter';
-import { classifyImage } from '../services/imageClassifier';
-import { extractTextMixed } from '../services/mixedScriptOcr';
+import {keywordFilter} from '../utils/keywordFilter';
+import {classifyImage} from '../services/imageClassifier';
+import {extractTextMixed} from '../services/mixedScriptOcr';
 import {resetActiveArabicRecognition} from '../services/mobileArabicOcr';
-import { ApiAuthError } from '../services/apiClient';
-import { postScreenEvent } from '../services/screenEventsApi';
-import { clearStaleNotificationMissionLaunch } from '../missions/missionNotificationLaunch';
-import { presentMissionFromCapture } from '../missions/presentMissionFromCapture';
-import { withTimeout } from '../utils/withTimeout';
+import {ApiAuthError} from '../services/apiClient';
+import {postScreenEvent} from '../services/screenEventsApi';
+import {clearStaleNotificationMissionLaunch} from '../missions/missionNotificationLaunch';
+import {presentMissionFromCapture} from '../missions/presentMissionFromCapture';
+import {withTimeout} from '../utils/withTimeout';
 import {
   applyExplicitOcrBoost,
   applyPostProcessingOverride,
@@ -25,10 +25,11 @@ import {
   enforceCategoryConsistency,
   resolveFinalCategoryWithScore,
 } from '../utils/riskCombination';
-import { shouldCapFilteredSearchResults } from '../utils/riskySearchContext';
+import {shouldCapFilteredSearchResults} from '../utils/riskySearchContext';
 import {
   computeAdaptiveIntervalMs,
   computeEffectiveAdaptiveInterval,
+  decideDeferredFrameHandoff,
   decideScrollSettle,
   decideTickAction,
   initialScrollSettleState,
@@ -47,23 +48,27 @@ import {
   resolveEffectiveForegroundForSwitch,
   shouldCaptureAfterLauncherReturn,
 } from '../utils/appSwitchCapture';
-import { getAppCategory, isLauncherPackage, type AppCategory } from '../utils/appCapturePolicy';
+import {
+  getAppCategory,
+  isLauncherPackage,
+  type AppCategory,
+} from '../utils/appCapturePolicy';
 import {
   inferAppPackageFromOcr,
   shouldOverridePackageWithOcrInference,
 } from '../utils/inferAppPackageFromOcr';
-import { shouldNeutralizeLauncherWidgetCapture } from '../utils/launcherCaptureContext';
+import {shouldNeutralizeLauncherWidgetCapture} from '../utils/launcherCaptureContext';
 import {
   markMonitoringStarted,
   resetMissionPresentationGuard,
   shouldPresentMissionFromCapture,
 } from '../utils/missionPresentationGuard';
-import { scError, scLog, scWarn } from '../utils/screenCaptureLogger';
-import { detectCaptureQuality } from '../utils/captureQuality';
-import { isDevOverlayOcrText } from '../utils/devOverlayOcr';
-import { shouldSkipScreenEventReporting } from '../utils/benignRiskContext';
-import { toMlKitImageUri } from '../utils/imageUri';
-import { setLastCapturePath } from '../utils/lastCapturePath';
+import {scError, scLog, scWarn} from '../utils/screenCaptureLogger';
+import {detectCaptureQuality} from '../utils/captureQuality';
+import {isDevOverlayOcrText} from '../utils/devOverlayOcr';
+import {shouldSkipScreenEventReporting} from '../utils/benignRiskContext';
+import {toMlKitImageUri} from '../utils/imageUri';
+import {setLastCapturePath} from '../utils/lastCapturePath';
 import {
   hasUsageAccess,
   isForegroundLookupStuck,
@@ -87,10 +92,13 @@ import {
   type CaptureCoordinator,
   type NativeRejectionReason,
 } from '../capture/captureCoordinator';
-import { createWindowEventFilter, isImePackage } from '../capture/windowEventFilter';
-import { createA11yHealthTracker, type A11yHealth } from '../capture/a11yHealth';
-import { useAccessibilityEvents } from './useAccessibilityEvents';
-import { isAccessibilityServiceEnabled } from '../native/SafeGuardAccessibility';
+import {
+  createWindowEventFilter,
+  isImePackage,
+} from '../capture/windowEventFilter';
+import {createA11yHealthTracker, type A11yHealth} from '../capture/a11yHealth';
+import {useAccessibilityEvents} from './useAccessibilityEvents';
+import {isAccessibilityServiceEnabled} from '../native/SafeGuardAccessibility';
 import type {
   AccessibilityKeyboardChangedEvent,
   AccessibilityScrollEvent,
@@ -139,7 +147,9 @@ const FRAME_PROCESSING_WATCHDOG_MS = 25_000;
  */
 const OCR_LOCK_TAKEOVER_MS = 8_000;
 
-function isUsableForegroundPackage(pkg: string | null | undefined): pkg is string {
+function isUsableForegroundPackage(
+  pkg: string | null | undefined,
+): pkg is string {
   if (!pkg || pkg === 'unknown' || pkg === SYSTEM_UI_PACKAGE) {
     return false;
   }
@@ -170,7 +180,9 @@ async function logNativeDebugState(label: string): Promise<void> {
   }
 }
 
-export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) {
+export function useScreenshotCapture(
+  options: UseScreenshotCaptureOptions = {},
+) {
   const {
     intervalMs = RISK_INTERVAL_LOW_MS,
     maxTextLength = DEFAULT_MAX_TEXT,
@@ -183,8 +195,11 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
   const [lastError, setLastError] = useState<string | null>(null);
   const [lastCaptureAt, setLastCaptureAt] = useState<string | null>(null);
   const [isPaused, setIsPaused] = useState(false);
-  const [lastForegroundApp, setLastForegroundApp] = useState<string | null>(null);
-  const [dynamicIntervalMs, setDynamicIntervalMs] = useState(RISK_INTERVAL_LOW_MS);
+  const [lastForegroundApp, setLastForegroundApp] = useState<string | null>(
+    null,
+  );
+  const [dynamicIntervalMs, setDynamicIntervalMs] =
+    useState(RISK_INTERVAL_LOW_MS);
   const [appCategory, setAppCategory] = useState<AppCategory | null>(null);
   const [avgRiskScore, setAvgRiskScore] = useState<number | null>(null);
   /** Evidence-based accessibility-service health for the Monitor card (observability only). */
@@ -206,12 +221,12 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
   const processingPhaseRef = useRef<{
     phase: ProcessingPhase;
     startedAtMs: number;
-  }>({ phase: 'idle', startedAtMs: 0 });
+  }>({phase: 'idle', startedAtMs: 0});
   /** Latest frame deferred while OCR was busy — processed after current finishes. */
   const pendingFrameRef = useRef<ScreenCapturedEvent | null>(null);
   const processCapturedFrameRef = useRef<
     (event: ScreenCapturedEvent) => Promise<CaptureCycleResult>
-  >(async () => ({ success: false }));
+  >(async () => ({success: false}));
   const isStartingRef = useRef(false);
   const isMonitoringRef = useRef(false);
   const lastAppPackageRef = useRef<string | null>(null);
@@ -225,14 +240,16 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
   /** Wall-clock of the last native tick that passed the subsample gate. */
   const lastPeriodicPassAtRef = useRef(Number.NEGATIVE_INFINITY);
   /** A3c-3 tick-driven scroll-settle state (armed by `onAccessibilityScroll`). */
-  const scrollSettleStateRef = useRef<ScrollSettleState>(initialScrollSettleState());
+  const scrollSettleStateRef = useRef<ScrollSettleState>(
+    initialScrollSettleState(),
+  );
   const followUpTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const appPollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const visitedLauncherRef = useRef(false);
 
   /** Accessibility window-event driven app-switch path (falls back to the 1s poll). */
   const windowEventFilterRef = useRef(
-    createWindowEventFilter({ now: () => Date.now() }),
+    createWindowEventFilter({now: () => Date.now()}),
   );
   const a11yConnectedRef = useRef(false);
   /** Wall-clock of the last window event *received* (pre-filter) — poll staleness watchdog. */
@@ -245,7 +262,7 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
    * `A11Y_STALE_MS` / `a11yDriving` and every capture decision are unaffected.
    */
   const a11yHealthRef = useRef(
-    createA11yHealthTracker({ now: () => Date.now() }),
+    createA11yHealthTracker({now: () => Date.now()}),
   );
   const syncA11yHealth = useCallback(() => {
     setA11yHealth(a11yHealthRef.current.getHealth());
@@ -272,7 +289,7 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
     }
     const logSub = screenCaptureEmitter.addListener(
       SCREEN_CAPTURE_EVENTS.log,
-      (event: { message: string }) => {
+      (event: {message: string}) => {
         scLog(`[Native] ${event.message}`);
       },
     );
@@ -316,63 +333,63 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
       try {
         const triggered = await getScreenCaptureModule().captureNow();
         if (triggered) {
-          scLog('Capture triggered', { reason });
+          scLog('Capture triggered', {reason});
         }
       } catch (err) {
-        scWarn('captureNow failed', { reason, err });
+        scWarn('captureNow failed', {reason, err});
       }
     },
     [],
   );
 
-  const applyEffectiveInterval = useCallback(
-    (reason: string) => {
-      const pkg = lastAppPackageRef.current;
-      const riskOnlyInterval = computeAdaptiveIntervalMs(riskHistoryRef.current);
-      const effectiveInterval = computeEffectiveAdaptiveInterval(
-        riskHistoryRef.current,
-        pkg,
-      );
-      const category =
-        pkg && isUsableForegroundPackage(pkg) ? getAppCategory(pkg) : null;
-      setAppCategory(category);
+  const applyEffectiveInterval = useCallback((reason: string) => {
+    const pkg = lastAppPackageRef.current;
+    const riskOnlyInterval = computeAdaptiveIntervalMs(riskHistoryRef.current);
+    const effectiveInterval = computeEffectiveAdaptiveInterval(
+      riskHistoryRef.current,
+      pkg,
+    );
+    const category =
+      pkg && isUsableForegroundPackage(pkg) ? getAppCategory(pkg) : null;
+    setAppCategory(category);
 
-      if (effectiveInterval === dynamicIntervalMsRef.current) {
-        return;
-      }
+    if (effectiveInterval === dynamicIntervalMsRef.current) {
+      return;
+    }
 
-      dynamicIntervalMsRef.current = effectiveInterval;
-      setDynamicIntervalMs(effectiveInterval);
+    dynamicIntervalMsRef.current = effectiveInterval;
+    setDynamicIntervalMs(effectiveInterval);
 
-      const avg =
-        riskHistoryRef.current.length > 0
-          ? Math.round(
-              riskHistoryRef.current.reduce((sum, s) => sum + s, 0) /
-                riskHistoryRef.current.length,
-            )
-          : null;
-      if (avg != null) {
-        setAvgRiskScore(avg);
-      }
+    const avg =
+      riskHistoryRef.current.length > 0
+        ? Math.round(
+            riskHistoryRef.current.reduce((sum, s) => sum + s, 0) /
+              riskHistoryRef.current.length,
+          )
+        : null;
+    if (avg != null) {
+      setAvgRiskScore(avg);
+    }
 
-      scLog('Adaptive interval changed', {
-        reason,
-        avgRisk: avg,
-        history: [...riskHistoryRef.current],
-        appPackage: pkg,
-        appCategory: category,
-        riskOnlyIntervalMs: riskOnlyInterval,
-        effectiveIntervalMs: effectiveInterval,
-      });
-      // No timer to restart — the native periodic tick handler reads
-      // dynamicIntervalMsRef fresh on every tick (0 = periodic disabled).
-    },
-    [],
-  );
+    scLog('Adaptive interval changed', {
+      reason,
+      avgRisk: avg,
+      history: [...riskHistoryRef.current],
+      appPackage: pkg,
+      appCategory: category,
+      riskOnlyIntervalMs: riskOnlyInterval,
+      effectiveIntervalMs: effectiveInterval,
+    });
+    // No timer to restart — the native periodic tick handler reads
+    // dynamicIntervalMsRef fresh on every tick (0 = periodic disabled).
+  }, []);
 
   const updateRiskAndInterval = useCallback(
     (newRiskScore: number) => {
-      riskHistoryRef.current = pushRiskScore(riskHistoryRef.current, newRiskScore);
+      riskHistoryRef.current = pushRiskScore(
+        riskHistoryRef.current,
+        newRiskScore,
+      );
       const avg = Math.round(
         riskHistoryRef.current.reduce((sum, s) => sum + s, 0) /
           riskHistoryRef.current.length,
@@ -396,7 +413,7 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
         followUpTimerRef.current = null;
         void tryCaptureNow(CaptureReason.APP_SWITCH_FOLLOW_UP);
       }, delayMs);
-      scLog('Follow-up capture scheduled', { delayMs });
+      scLog('Follow-up capture scheduled', {delayMs});
     },
     [tryCaptureNow],
   );
@@ -440,7 +457,8 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
       }
 
       const pkg = event.packageName;
-      const wasLauncher = previousPkg !== null && isLauncherPackage(previousPkg);
+      const wasLauncher =
+        previousPkg !== null && isLauncherPackage(previousPkg);
       const nowLauncher = isLauncherPackage(pkg);
 
       // Keep attribution current — mirrors the poll's writes at the tail of its tick.
@@ -463,7 +481,7 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
         wasLauncher && !nowLauncher
           ? CaptureReason.APP_SWITCH_LAUNCHER_RETURN
           : CaptureReason.APP_SWITCH;
-      scLog('a11y.window.accepted', { from: previousPkg, to: pkg, reason });
+      scLog('a11y.window.accepted', {from: previousPkg, to: pkg, reason});
       void triggerAppSwitchCapture(reason);
       refreshIntervalForApp();
     },
@@ -509,7 +527,7 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
     );
   }, []);
 
-  const { connected: a11yConnected } = useAccessibilityEvents({
+  const {connected: a11yConnected} = useAccessibilityEvents({
     onWindowChanged: handleA11yWindowChanged,
     onKeyboardChanged: handleA11yKeyboardChanged,
     onScroll: handleA11yScroll,
@@ -545,11 +563,12 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
       processingStartTimeRef.current > 0
         ? Date.now() - processingStartTimeRef.current
         : 0;
-    const { phase } = processingPhaseRef.current;
+    const {phase} = processingPhaseRef.current;
     processingGenerationRef.current += 1;
     isProcessingRef.current = false;
     processingStartTimeRef.current = 0;
-    processingPhaseRef.current = { phase: 'idle', startedAtMs: 0 };
+    processingPhaseRef.current = {phase: 'idle', startedAtMs: 0};
+    pendingFrameRef.current = null;
     scWarn('Processing lock force-released after hung frame', {
       cause,
       elapsed,
@@ -573,16 +592,16 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
       from: prev.phase,
       to: next,
       appState: AppState.currentState,
-      ...(prev.startedAtMs > 0 ? { prevPhaseMs: now - prev.startedAtMs } : {}),
+      ...(prev.startedAtMs > 0 ? {prevPhaseMs: now - prev.startedAtMs} : {}),
     });
-    processingPhaseRef.current = { phase: next, startedAtMs: now };
+    processingPhaseRef.current = {phase: next, startedAtMs: now};
   }, []);
 
   const processCapturedFrame = useCallback(
     async (event: ScreenCapturedEvent): Promise<CaptureCycleResult> => {
       if (isMissionCapturePaused()) {
         scLog('Frame skipped — mission in progress');
-        return { success: false, skippedReason: 'mission' };
+        return {success: false, skippedReason: 'mission'};
       }
 
       if (isProcessingRef.current) {
@@ -591,14 +610,16 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
           processingGenerationRef.current += 1;
           isProcessingRef.current = false;
           processingStartTimeRef.current = 0;
-          processingPhaseRef.current = { phase: 'idle', startedAtMs: 0 };
+          processingPhaseRef.current = {phase: 'idle', startedAtMs: 0};
           pendingFrameRef.current = null;
-          scWarn('OCR lock takeover — previous frame hung', { elapsedMs: elapsed });
+          scWarn('OCR lock takeover — previous frame hung', {
+            elapsedMs: elapsed,
+          });
         } else {
           // Keep only the newest deferred frame; avoids LogBox spam from console.warn.
           pendingFrameRef.current = event;
-          scLog('Frame deferred — OCR in progress', { elapsedMs: elapsed });
-          return { success: false, skippedReason: 'ocr' };
+          scLog('Frame deferred — OCR in progress', {elapsedMs: elapsed});
+          return {success: false, skippedReason: 'ocr'};
         }
       }
 
@@ -606,7 +627,7 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
       isProcessingRef.current = true;
       processingStartTimeRef.current = Date.now();
       setPhase('foreground_lookup');
-      const { filePath, imageUri, appPackage } = event;
+      const {filePath, imageUri, appPackage} = event;
       const isActive = () => processingGenerationRef.current === generation;
 
       const processingWatchdog = setTimeout(() => {
@@ -616,7 +637,8 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
         processingGenerationRef.current += 1;
         isProcessingRef.current = false;
         processingStartTimeRef.current = 0;
-        processingPhaseRef.current = { phase: 'idle', startedAtMs: 0 };
+        processingPhaseRef.current = {phase: 'idle', startedAtMs: 0};
+        pendingFrameRef.current = null;
         scWarn('Processing watchdog — stale frame aborted', {
           filePath,
           timeoutMs: FRAME_PROCESSING_WATCHDOG_MS,
@@ -645,7 +667,7 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
       try {
         setLastCapturePath(filePath);
         const ocrInput = toMlKitImageUri(imageUri ?? filePath);
-        scLog('Frame received', { filePath, imageUri: ocrInput, appPackage });
+        scLog('Frame received', {filePath, imageUri: ocrInput, appPackage});
 
         const cacheAgeMs = Date.now() - lastAppPackageUpdatedAtRef.current;
         const cacheFresh = cacheAgeMs <= FOREGROUND_CACHE_MAX_AGE_MS;
@@ -669,28 +691,38 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
             ? cacheablePackage
             : null;
 
-        let fg: { packageName: string; appLabel: string; source?: string };
+        let fg: {packageName: string; appLabel: string; source?: string};
         if (cachedPollPackage !== null) {
-          fg = { packageName: cachedPollPackage, appLabel: cachedPollPackage, source: 'usage_stats' };
+          fg = {
+            packageName: cachedPollPackage,
+            appLabel: cachedPollPackage,
+            source: 'usage_stats',
+          };
         } else if (graceCachedPackage !== null) {
-          fg = { packageName: graceCachedPackage, appLabel: graceCachedPackage, source: 'cached_poll' };
+          fg = {
+            packageName: graceCachedPackage,
+            appLabel: graceCachedPackage,
+            source: 'cached_poll',
+          };
         } else if (Platform.OS === 'android') {
           if (isForegroundLookupStuck()) {
             // Background: RN freezes JS timers, so a wedged UsageStats IPC can't time out and would
             // otherwise hang every frame forever. Don't await it — kick a fresh self-healing lookup
             // and attribute this frame as unknown. Risk detection must never block on attribution.
-            scWarn('Foreground lookup wedged — skipping await, attributing unknown');
+            scWarn(
+              'Foreground lookup wedged — skipping await, attributing unknown',
+            );
             void resolveForegroundApp();
-            fg = { packageName: 'unknown', appLabel: 'unknown', source: 'none' };
+            fg = {packageName: 'unknown', appLabel: 'unknown', source: 'none'};
           } else {
             fg = await withTimeout(
               resolveForegroundAppWithRetry(3, 200, ownAppInBackground),
               FOREGROUND_LOOKUP_TIMEOUT_MS,
-              { packageName: 'unknown', appLabel: 'unknown', source: 'none' },
+              {packageName: 'unknown', appLabel: 'unknown', source: 'none'},
             );
           }
         } else {
-          fg = { packageName: 'unknown', appLabel: 'unknown', source: 'none' };
+          fg = {packageName: 'unknown', appLabel: 'unknown', source: 'none'};
         }
 
         if (cachedPollPackage !== null) {
@@ -705,17 +737,23 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
           });
         }
 
-        const fgPackage = isUsableForegroundPackage(fg.packageName) ? fg.packageName : null;
-        const eventPackage = isUsableForegroundPackage(appPackage) ? appPackage : null;
+        const fgPackage = isUsableForegroundPackage(fg.packageName)
+          ? fg.packageName
+          : null;
+        const eventPackage = isUsableForegroundPackage(appPackage)
+          ? appPackage
+          : null;
         const missionGraceActive =
           missionEndedAtRef.current > 0 &&
           Date.now() - missionEndedAtRef.current < MISSION_FOREGROUND_GRACE_MS;
         const gracePackage =
-          missionGraceActive && isUsableForegroundPackage(foregroundAtPauseRef.current)
+          missionGraceActive &&
+          isUsableForegroundPackage(foregroundAtPauseRef.current)
             ? foregroundAtPauseRef.current
-            : missionGraceActive && isUsableForegroundPackage(lastAppPackageRef.current)
-              ? lastAppPackageRef.current
-              : null;
+            : missionGraceActive &&
+              isUsableForegroundPackage(lastAppPackageRef.current)
+            ? lastAppPackageRef.current
+            : null;
 
         let cachedPackage: string | null = null;
         if (cacheablePackage !== null && cacheFresh && !ownAppInBackground) {
@@ -743,18 +781,22 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
           isUsableForegroundPackage(lastAppPackageRef.current) &&
           !cacheFresh
         ) {
-          scWarn('Foreground cache stale — live lookup failed; not reusing old app', {
-            cached: lastAppPackageRef.current,
-            cacheAgeMs,
-          });
+          scWarn(
+            'Foreground cache stale — live lookup failed; not reusing old app',
+            {
+              cached: lastAppPackageRef.current,
+              cacheAgeMs,
+            },
+          );
         }
 
         if (!isActive()) {
-          scWarn('Stale frame aborted — before vision', { filePath });
-          return { success: false, skippedReason: 'stale' };
+          scWarn('Stale frame aborted — before vision', {filePath});
+          return {success: false, skippedReason: 'stale'};
         }
 
-        const resolvedPackage = fgPackage ?? eventPackage ?? cachedPackage ?? 'unknown';
+        const resolvedPackage =
+          fgPackage ?? eventPackage ?? cachedPackage ?? 'unknown';
 
         const resolvedLabel =
           fgPackage &&
@@ -775,17 +817,17 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
           source: fgPackage
             ? fg.source
             : eventPackage === resolvedPackage
-              ? 'capture_event'
-              : cachedPackage === resolvedPackage
-                ? 'cached_poll'
-                : fg.source,
+            ? 'capture_event'
+            : cachedPackage === resolvedPackage
+            ? 'cached_poll'
+            : fg.source,
         });
         setLastForegroundApp(resolvedPackage);
 
         setPhase('vision');
         const visionResult = await withTimeout(
           Promise.all([
-            extractTextMixed(ocrInput, { filePath, appPackage: resolvedPackage }),
+            extractTextMixed(ocrInput, {filePath, appPackage: resolvedPackage}),
             classifyImage(ocrInput, filePath),
           ]),
           VISION_PIPELINE_TIMEOUT_MS,
@@ -793,15 +835,15 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
         );
 
         if (!isActive()) {
-          scWarn('Stale frame aborted — after foreground', { filePath });
-          return { success: false, skippedReason: 'stale' };
+          scWarn('Stale frame aborted — after foreground', {filePath});
+          return {success: false, skippedReason: 'stale'};
         }
 
         if (!visionResult) {
           scWarn('Vision pipeline timed out — frame skipped', {
             timeoutMs: VISION_PIPELINE_TIMEOUT_MS,
           });
-          return { success: false, skippedReason: 'vision_timeout' };
+          return {success: false, skippedReason: 'vision_timeout'};
         }
 
         const [ocrMixed, imageClassification] = visionResult;
@@ -817,7 +859,10 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
           preview: preview.slice(0, 80),
           source: ocrMixed.source,
           ...(__DEV__
-            ? { arabic: ocrMixed.hasArabicScript, arabizi: ocrMixed.hasArabiziPattern }
+            ? {
+                arabic: ocrMixed.hasArabicScript,
+                arabizi: ocrMixed.hasArabiziPattern,
+              }
             : {}),
         });
 
@@ -827,12 +872,18 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
         }
 
         const keywordResult = devOverlayOcr
-          ? { riskFlag: false, category: 'educational' as const, matchedKeywords: [] as string[] }
+          ? {
+              riskFlag: false,
+              category: 'educational' as const,
+              matchedKeywords: [] as string[],
+            }
           : keywordFilter(preview, normalizedText);
 
         if (keywordResult.riskFlag && __DEV__) {
-          // eslint-disable-next-line no-console
-          console.log('[Risk] Matched keywords:', keywordResult.matchedKeywords);
+          console.log(
+            '[Risk] Matched keywords:',
+            keywordResult.matchedKeywords,
+          );
         }
 
         const ocrRiskScore = devOverlayOcr
@@ -855,9 +906,14 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
             matchedKeywords: keywordResult.matchedKeywords,
           })
         ) {
-          scLog('[Risk] Filtered UI + low TFLite — capping final combined risk');
+          scLog(
+            '[Risk] Filtered UI + low TFLite — capping final combined risk',
+          );
           imageRiskScore = Math.min(imageRiskScore, 20);
-          combinedRiskScore = Math.min(combineRiskScores(ocrRiskScore, imageRiskScore), 25);
+          combinedRiskScore = Math.min(
+            combineRiskScores(ocrRiskScore, imageRiskScore),
+            25,
+          );
           postProcessedCategory = 'neutral';
         } else {
           const boosted = applyExplicitOcrBoost(
@@ -916,11 +972,19 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
           });
         }
 
-        if (shouldNeutralizeLauncherWidgetCapture(attributionPackage, cleanedForKeywords)) {
-          scLog('Launcher recents/widget OCR — risk neutralized (open Chrome for enforcement)', {
-            package: attributionPackage,
-            preview: preview.slice(0, 80),
-          });
+        if (
+          shouldNeutralizeLauncherWidgetCapture(
+            attributionPackage,
+            cleanedForKeywords,
+          )
+        ) {
+          scLog(
+            'Launcher recents/widget OCR — risk neutralized (open Chrome for enforcement)',
+            {
+              package: attributionPackage,
+              preview: preview.slice(0, 80),
+            },
+          );
           finalRiskFlag = false;
           finalCategory = 'neutral';
           combinedRiskScore = Math.min(combinedRiskScore, 25);
@@ -935,7 +999,7 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
         if (captureQuality === 'blank_or_protected') {
           scWarn(
             'Capture may be blank or protected (Incognito/DRM?) — TFLite saw little content; try normal Chrome tab + app-switch capture',
-            { labels: details.mlKitLabels?.slice(0, 4) },
+            {labels: details.mlKitLabels?.slice(0, 4)},
           );
         }
 
@@ -974,8 +1038,8 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
         });
 
         if (!isActive()) {
-          scWarn('Stale frame aborted — before API post', { filePath });
-          return { success: false, skippedReason: 'stale' };
+          scWarn('Stale frame aborted — before API post', {filePath});
+          return {success: false, skippedReason: 'stale'};
         }
 
         setPhase('api_post');
@@ -985,14 +1049,18 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
           null,
         );
         if (!screenEventResponse) {
-          scWarn('POST /api/screen-events timed out', { timeoutMs: API_POST_TIMEOUT_MS });
-          return { success: false, skippedReason: 'api_timeout' };
+          scWarn('POST /api/screen-events timed out', {
+            timeoutMs: API_POST_TIMEOUT_MS,
+          });
+          return {success: false, skippedReason: 'api_timeout'};
         }
         scLog('POST /api/screen-events OK');
 
         if (!isActive()) {
-          scWarn('Stale frame aborted — mission presentation skipped', { filePath });
-          return { success: true, skippedReason: 'stale' };
+          scWarn('Stale frame aborted — mission presentation skipped', {
+            filePath,
+          });
+          return {success: true, skippedReason: 'stale'};
         }
 
         if (screenEventResponse.newMission?.id) {
@@ -1004,14 +1072,15 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
             });
           } else if (
             missionEndedAtRef.current > 0 &&
-            Date.now() - missionEndedAtRef.current < POST_MISSION_PRESENT_GRACE_MS
+            Date.now() - missionEndedAtRef.current <
+              POST_MISSION_PRESENT_GRACE_MS
           ) {
             scLog('Mission presentation skipped — post-mission grace', {
               missionId: nm.id,
               sinceMissionEndMs: Date.now() - missionEndedAtRef.current,
             });
           } else if (
-            shouldPresentMissionFromCapture(nm.id, { reSurfaced: nm.reSurfaced })
+            shouldPresentMissionFromCapture(nm.id, {reSurfaced: nm.reSurfaced})
           ) {
             scLog('New mission from screen event — presenting mission UI', {
               missionId: nm.id,
@@ -1024,10 +1093,12 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
                 title: nm.title,
                 description: nm.description,
                 points: nm.points,
-                missionType: String(nm.type ?? nm.metadata?.type ?? 'real_world'),
+                missionType: String(
+                  nm.type ?? nm.metadata?.type ?? 'real_world',
+                ),
                 metadata: (nm.metadata ?? {}) as Record<string, unknown>,
               },
-              { reSurfaced: nm.reSurfaced },
+              {reSurfaced: nm.reSurfaced},
             );
           } else {
             scLog('Mission presentation skipped — debounce or startup grace', {
@@ -1037,11 +1108,15 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
           }
         } else if (screenEventResponse.missionGeneration) {
           scLog(
-            finalRiskFlag ? 'Risky capture — no mission overlay' : 'No new mission',
+            finalRiskFlag
+              ? 'Risky capture — no mission overlay'
+              : 'No new mission',
             screenEventResponse.missionGeneration,
           );
         } else if (finalRiskFlag) {
-          scLog('Risky capture — no mission in API response', { combinedRiskScore });
+          scLog('Risky capture — no mission in API response', {
+            combinedRiskScore,
+          });
         }
         setLastCaptureAt(payload.timestamp);
         coordinatorRef.current!.onFrameAccepted(Date.now());
@@ -1049,59 +1124,87 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
 
         updateRiskAndInterval(combinedRiskScore);
 
-        return { success: true, event: payload };
+        return {success: true, event: payload};
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         if (err instanceof ApiAuthError) {
           // Avoid RN redbox for expected session expiry; apiClient already refreshes JWT.
           scWarn('processCapturedFrame skipped — auth', message);
           setLastError(message);
-          return { success: false, skippedReason: 'auth', error: message };
+          return {success: false, skippedReason: 'auth', error: message};
         }
         scError('processCapturedFrame failed', err);
         if (message.toLowerCase().includes('storage')) {
-          return { success: false, skippedReason: 'storage', error: message };
+          return {success: false, skippedReason: 'storage', error: message};
         }
         setLastError(message);
-        return { success: false, error: message };
+        return {success: false, error: message};
       } finally {
         clearTimeout(processingWatchdog);
         if (processingHeartbeat !== undefined) {
           clearInterval(processingHeartbeat);
         }
-        // D3: all three resets are generation-guarded. A superseded frame's
-        // `finally` running late (after a force-release / watchdog / OCR-lock
-        // takeover bumped the generation and a newer frame is now active) must
-        // not touch the active frame's lock, start timestamp, or phase. A stray
-        // `processingStartTimeRef.current = 0` here silently disables the 60s
-        // liveness backstop for that active frame (`shouldForceReleaseProcessingLock`
-        // early-returns on `<= 0`), forces a spurious OCR-lock takeover, and
-        // makes its heartbeat self-terminate.
-        if (processingGenerationRef.current === generation) {
+        // D3: the lock-release fields are generation-guarded — a superseded
+        // frame's `finally` running late (after a force-release / watchdog /
+        // OCR-lock takeover bumped the generation and a newer frame is now
+        // active) must not touch the active frame's lock, start timestamp, or
+        // phase. A stray `processingStartTimeRef.current = 0` here silently
+        // disables the 60s liveness backstop for that active frame
+        // (`shouldForceReleaseProcessingLock` early-returns on `<= 0`),
+        // forces a spurious OCR-lock takeover, and makes its heartbeat
+        // self-terminate.
+        const isOwnGeneration = processingGenerationRef.current === generation;
+        if (isOwnGeneration) {
           isProcessingRef.current = false;
           processingStartTimeRef.current = 0;
           setPhase('idle');
         }
+
+        // ALL_IS_FIXED #12 (C1): isOwnGeneration is passed to
+        // decideDeferredFrameHandoff as a REAL, sometimes-false input — this
+        // call is deliberately NOT nested inside the `if (isOwnGeneration)`
+        // above. Nesting it would make the parameter trivially true at the
+        // only call site and silently reintroduce the bug this fix closes
+        // (a stale run's late `finally` stealing the live generation's
+        // deferred frame, or the coordinator's coalesced pending reason). A
+        // stale generation must still reach this code; it must just always
+        // resolve to 'none' and never clear pendingFrameRef, which the live
+        // generation may still need to read.
         const deferredFrame = pendingFrameRef.current;
-        pendingFrameRef.current = null;
-        if (
-          deferredFrame &&
-          !isProcessingRef.current &&
-          isMonitoringRef.current &&
-          !isMissionCapturePaused()
-        ) {
+        const hasPendingReason =
+          coordinatorRef.current!.peekPendingReason() != null;
+
+        const deferredFrameAction = decideDeferredFrameHandoff({
+          isOwnGeneration,
+          hasDeferredFrame: deferredFrame !== null,
+          isProcessing: isProcessingRef.current,
+          isMonitoring: isMonitoringRef.current,
+          missionPaused: isMissionCapturePaused(),
+          hasPendingReason,
+        });
+
+        // Clearing is gated on isOwnGeneration directly, not on the returned
+        // action — the old code cleared pendingFrameRef unconditionally
+        // whenever the (then-combined) guard passed, regardless of which
+        // downstream branch fired. Keeping this separate from the action
+        // keeps each concern independently reviewable.
+        if (isOwnGeneration) {
+          pendingFrameRef.current = null;
+        }
+
+        if (deferredFrameAction === 'processDeferredFrame') {
           scLog('Processing deferred frame after OCR unlock');
           setTimeout(() => {
-            void processCapturedFrameRef.current(deferredFrame);
+            void processCapturedFrameRef.current(deferredFrame!);
           }, 0);
-        } else if (
-          coordinatorRef.current!.takePendingReason() != null &&
-          isMonitoringRef.current
-        ) {
+        } else if (deferredFrameAction === 'triggerPendingReason') {
+          coordinatorRef.current!.takePendingReason();
           void triggerAppSwitchCapture(CaptureReason.APP_SWITCH_DEFERRED);
         }
         if (!__DEV__) {
-          void getScreenCaptureModule().deleteFile(filePath).catch(() => undefined);
+          void getScreenCaptureModule()
+            .deleteFile(filePath)
+            .catch(() => undefined);
         }
       }
     },
@@ -1175,16 +1278,21 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
       lastAppPackageRef.current = gracePackage;
       lastAppPackageUpdatedAtRef.current = Date.now();
       setLastForegroundApp(gracePackage);
-      scLog('Foreground cache restored from pre-mission app', { package: gracePackage });
+      scLog('Foreground cache restored from pre-mission app', {
+        package: gracePackage,
+      });
       return;
     }
 
     const fg = await withTimeout(
       resolveForegroundApp(),
       FOREGROUND_LOOKUP_TIMEOUT_MS,
-      { packageName: 'unknown', appLabel: 'unknown', source: 'none' as const },
+      {packageName: 'unknown', appLabel: 'unknown', source: 'none' as const},
     );
-    if (isUsableForegroundPackage(fg.packageName) && !isLauncherPackage(fg.packageName)) {
+    if (
+      isUsableForegroundPackage(fg.packageName) &&
+      !isLauncherPackage(fg.packageName)
+    ) {
       lastAppPackageRef.current = fg.packageName;
       lastAppPackageUpdatedAtRef.current = Date.now();
       setLastForegroundApp(fg.packageName);
@@ -1195,7 +1303,9 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
       return;
     }
 
-    scLog('Foreground cache refresh — no usable app (keeping last known if any)');
+    scLog(
+      'Foreground cache refresh — no usable app (keeping last known if any)',
+    );
   }, []);
 
   const startSmartCaptureTimers = useCallback(() => {
@@ -1210,7 +1320,11 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
         const fg = await withTimeout(
           resolveForegroundApp(),
           FOREGROUND_LOOKUP_TIMEOUT_MS,
-          { packageName: 'unknown', appLabel: 'unknown', source: 'none' as const },
+          {
+            packageName: 'unknown',
+            appLabel: 'unknown',
+            source: 'none' as const,
+          },
         );
         const pkg = resolveEffectiveForegroundForSwitch(
           AppState.currentState,
@@ -1225,7 +1339,8 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
           previousPkg !== null &&
           previousPkg !== APP_OWN_PACKAGE &&
           !isLauncherPackage(previousPkg) &&
-          Date.now() - lastAppPackageUpdatedAtRef.current <= FOREGROUND_CACHE_MAX_AGE_MS;
+          Date.now() - lastAppPackageUpdatedAtRef.current <=
+            FOREGROUND_CACHE_MAX_AGE_MS;
 
         if (
           AppState.currentState !== 'active' &&
@@ -1265,10 +1380,10 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
           (launcherReturn || appChanged) &&
           a11yHealthRef.current.onPollObservedSwitch()
         ) {
-          scLog('a11y.health.degraded', { from: previousPkg, to: pkg });
+          scLog('a11y.health.degraded', {from: previousPkg, to: pkg});
           syncA11yHealth();
           // Distinguish "unbound" from "bound but silent" — one bridge call per proven miss.
-          void isAccessibilityServiceEnabled().then((v) => {
+          void isAccessibilityServiceEnabled().then(v => {
             a11yHealthRef.current.setEnabled(v);
             syncA11yHealth();
           });
@@ -1283,10 +1398,14 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
             });
           } else {
             if (a11yConnectedRef.current) {
-              scLog('Poll fallback — a11y events stale', { package: pkg });
+              scLog('Poll fallback — a11y events stale', {package: pkg});
             }
-            scLog('Same app resumed after launcher — capturing', { package: pkg });
-            await triggerAppSwitchCapture(CaptureReason.APP_SWITCH_LAUNCHER_RETURN);
+            scLog('Same app resumed after launcher — capturing', {
+              package: pkg,
+            });
+            await triggerAppSwitchCapture(
+              CaptureReason.APP_SWITCH_LAUNCHER_RETURN,
+            );
           }
         } else if (appChanged) {
           if (a11yDriving) {
@@ -1374,11 +1493,14 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
         // native catch; E_CAPTURE is how the same stale token surfaces on a build
         // without that catch. Anything else (e.g. E_INTERVAL — a bad constant, not
         // a recoverable state) rethrows immediately: no teardown, no consent dialog.
-        const code = (startErr as { code?: string } | null)?.code;
+        const code = (startErr as {code?: string} | null)?.code;
         if (code !== 'E_STALE_PROJECTION' && code !== 'E_CAPTURE') {
           throw startErr;
         }
-        scWarn('startCapture rejected (stale token) — retrying once with fresh consent', startErr);
+        scWarn(
+          'startCapture rejected (stale token) — retrying once with fresh consent',
+          startErr,
+        );
         try {
           await native.stopCapture();
         } catch (stopErr) {
@@ -1386,7 +1508,9 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
         }
         const regranted = await requestPermission();
         if (!regranted) {
-          throw startErr instanceof Error ? startErr : new Error(String(startErr));
+          throw startErr instanceof Error
+            ? startErr
+            : new Error(String(startErr));
         }
         await native.startCapture(NATIVE_TICK_INTERVAL_MS);
       }
@@ -1563,16 +1687,15 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
         }
         void processCapturedFrame(event)
           .then(onCycleComplete)
-          .catch((err) => scError('Frame handler error', err));
+          .catch(err => scError('Frame handler error', err));
       },
     );
 
     const errorSub = screenCaptureEmitter.addListener(
       SCREEN_CAPTURE_EVENTS.error,
-      (event: { message: string }) => {
+      (event: {message: string}) => {
         const msg = event.message ?? '';
-        const isBenign =
-          /permission denied|cancelled|not ready/i.test(msg);
+        const isBenign = /permission denied|cancelled|not ready/i.test(msg);
         if (isBenign) {
           scWarn('Native capture notice', msg);
         } else {
@@ -1639,7 +1762,7 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
         // see `PHASE_DEADLINE_MS`). Cause string names the phase for smoke
         // attribution and defence-log triage.
         if (action === 'forceReleasePhase') {
-          const { phase } = processingPhaseRef.current;
+          const {phase} = processingPhaseRef.current;
           forceReleaseProcessingLock(`tick-phase-timeout:${phase}`);
           return;
         }
@@ -1721,12 +1844,12 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
       return undefined;
     }
 
-    const subscription = AppState.addEventListener('change', (nextState) => {
+    const subscription = AppState.addEventListener('change', nextState => {
       if (!isMonitoringRef.current || isMissionCapturePaused()) {
         return;
       }
       if (nextState === 'background' || nextState === 'inactive') {
-        scLog('AppState left foreground — triggering capture', { nextState });
+        scLog('AppState left foreground — triggering capture', {nextState});
         void (async () => {
           // Inside this branch nextState is narrowed to 'background' | 'inactive' by the
           // enclosing check above — backgrounded is unconditionally true here, not
@@ -1734,7 +1857,11 @@ export function useScreenshotCapture(options: UseScreenshotCaptureOptions = {}) 
           const fg = await withTimeout(
             resolveForegroundAppWithRetry(3, 200, true),
             FOREGROUND_LOOKUP_TIMEOUT_MS,
-            { packageName: 'unknown', appLabel: 'unknown', source: 'none' as const },
+            {
+              packageName: 'unknown',
+              appLabel: 'unknown',
+              source: 'none' as const,
+            },
           );
           if (
             isUsableForegroundPackage(fg.packageName) &&
