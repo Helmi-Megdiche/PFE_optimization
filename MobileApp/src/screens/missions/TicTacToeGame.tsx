@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View, type ViewStyle } from 'react-native';
 import { type Difficulty } from '../../missions/games/gameLogic';
 import {
   applyAiMove,
@@ -109,8 +109,6 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     backgroundColor: focus.surface,
     borderRadius: 18,
-    borderWidth: 1,
-    borderColor: focus.border,
     overflow: 'hidden',
   },
   cell: {
@@ -124,3 +122,8 @@ const styles = StyleSheet.create({
   mark: { color: focus.accent, fontSize: 48, fontWeight: '800' },
   markO: { color: focus.coral },
 });
+
+export const gridLayout: {grid: ViewStyle; cell: ViewStyle} = {
+  grid: styles.grid,
+  cell: styles.cell,
+};
