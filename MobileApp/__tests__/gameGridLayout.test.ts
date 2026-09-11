@@ -1,4 +1,5 @@
 import {gridLayout as tttGridLayout} from '../src/screens/missions/TicTacToeGame';
+import {gridLayout as sudokuGridLayout} from '../src/screens/missions/SudokuGame';
 
 /**
  * ViewStyle's width/height/borderWidth are `DimensionValue | undefined` (number, percent
@@ -46,6 +47,44 @@ describe('TicTacToe grid layout', () => {
   // absence explicitly rather than trying to fold every spacing key into the arithmetic.
   it('has no padding on the grid or margin on the cell that the arithmetic above ignores', () => {
     const {grid, cell} = tttGridLayout;
+    expect(grid.padding).toBeUndefined();
+    expect(grid.paddingHorizontal).toBeUndefined();
+    expect(grid.paddingVertical).toBeUndefined();
+    expect(cell.margin).toBeUndefined();
+    expect(cell.marginHorizontal).toBeUndefined();
+    expect(cell.marginVertical).toBeUndefined();
+  });
+});
+
+describe('Sudoku grid layout', () => {
+  // Fixed game shape: a 4x4 mini board (see SudokuGame.tsx's "Mini Sudoku (4×4)" heading).
+  const perRow = 4;
+
+  it('cells fit the grid content box exactly (width)', () => {
+    const {grid, cell} = sudokuGridLayout;
+    const contentWidth =
+      asNumber(grid.width, 'grid.width') -
+      2 * asNumber(grid.borderWidth ?? 0, 'grid.borderWidth');
+    expect(perRow * asNumber(cell.width, 'cell.width')).toBeLessThanOrEqual(
+      contentWidth,
+    );
+  });
+
+  it('cells fit the grid content box exactly (height)', () => {
+    const {grid, cell} = sudokuGridLayout;
+    const contentHeight =
+      asNumber(grid.height, 'grid.height') -
+      2 * asNumber(grid.borderWidth ?? 0, 'grid.borderWidth');
+    expect(perRow * asNumber(cell.height, 'cell.height')).toBeLessThanOrEqual(
+      contentHeight,
+    );
+  });
+
+  // Same rationale as the TicTacToe block above: border is the only spacing key folded into
+  // the arithmetic, so guard padding/margin absence explicitly rather than trying to absorb
+  // every spacing key into the arithmetic.
+  it('has no padding on the grid or margin on the cell that the arithmetic above ignores', () => {
+    const {grid, cell} = sudokuGridLayout;
     expect(grid.padding).toBeUndefined();
     expect(grid.paddingHorizontal).toBeUndefined();
     expect(grid.paddingVertical).toBeUndefined();

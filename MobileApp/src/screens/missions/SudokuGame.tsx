@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View, type ViewStyle } from 'react-native';
 import {
   isSudokuSolved,
   makeSudokuPuzzle,
@@ -133,8 +133,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     borderRadius: 16,
-    borderWidth: 1,
-    borderColor: focus.border,
     overflow: 'hidden',
   },
   cell: {
@@ -167,3 +165,8 @@ const styles = StyleSheet.create({
   giveUp: { marginTop: 18 },
   giveUpText: { color: focus.textMuted, textDecorationLine: 'underline' },
 });
+
+export const gridLayout: {grid: ViewStyle; cell: ViewStyle} = {
+  grid: styles.grid,
+  cell: styles.cell,
+};
