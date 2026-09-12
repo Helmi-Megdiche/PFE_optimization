@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, {useCallback, useEffect, useRef, useState} from 'react';
 import {
   Alert,
   AppState,
@@ -9,16 +9,16 @@ import {
   Text,
   View,
 } from 'react-native';
-import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import type { RootStackParamList } from '../navigation/types';
-import { ApiHttpError } from '../services/apiClient';
+import type {NativeStackScreenProps} from '@react-navigation/native-stack';
+import type {RootStackParamList} from '../navigation/types';
+import {decideCompletionFailure} from '../missions/completionFailure';
 import {
   abandonMission,
   completeMission,
   type MissionCompletionPayload,
 } from '../services/missionsApi';
-import { resolveGameComponent } from './missions/gameRegistry';
-import { focus } from '../theme';
+import {resolveGameComponent} from './missions/gameRegistry';
+import {focus} from '../theme';
 import {
   beginMissionCaptureSession,
   forceEndMissionCaptureSession,
@@ -26,17 +26,18 @@ import {
 
 type Props = NativeStackScreenProps<RootStackParamList, 'MissionScreen'>;
 
-export function MissionScreen({ navigation, route }: Props): React.JSX.Element {
-  const { missionId, title, description, points, missionType, metadata } = route.params;
+export function MissionScreen({navigation, route}: Props): React.JSX.Element {
+  const {missionId, title, description, points, missionType, metadata} =
+    route.params;
   const settledRef = useRef(false); // completed OR abandoned — no further actions
   const [submitting, setSubmitting] = useState(false);
 
   const GameComponent = resolveGameComponent(missionType, metadata);
 
   useEffect(() => {
-    navigation.getParent()?.setOptions({ tabBarStyle: { display: 'none' } });
+    navigation.getParent()?.setOptions({tabBarStyle: {display: 'none'}});
     return () => {
-      navigation.getParent()?.setOptions({ tabBarStyle: undefined });
+      navigation.getParent()?.setOptions({tabBarStyle: undefined});
     };
   }, [navigation]);
 
@@ -60,7 +61,10 @@ export function MissionScreen({ navigation, route }: Props): React.JSX.Element {
     settledRef.current = true;
     try {
       const res = await abandonMission(missionId);
-      Alert.alert('Mission escaped', `Penalty: -${res.penalty} points. Total: ${res.totalPoints}`);
+      Alert.alert(
+        'Mission escaped',
+        `Penalty: -${res.penalty} points. Total: ${res.totalPoints}`,
+      );
     } catch (err) {
       Alert.alert('Error', err instanceof Error ? err.message : String(err));
     } finally {
@@ -71,13 +75,17 @@ export function MissionScreen({ navigation, route }: Props): React.JSX.Element {
 
   // Escape penalty only when the app leaves the foreground (not brief "inactive" on Android).
   useEffect(() => {
-    const appStateRef = { current: AppState.currentState };
+    const appStateRef = {current: AppState.currentState};
     const mountedAt = Date.now();
-    const sub = AppState.addEventListener('change', (next) => {
+    const sub = AppState.addEventListener('change', next => {
       const leftForeground =
         appStateRef.current === 'active' && next === 'background';
       const graceMs = 3_000;
-      if (leftForeground && Date.now() - mountedAt > graceMs && !settledRef.current) {
+      if (
+        leftForeground &&
+        Date.now() - mountedAt > graceMs &&
+        !settledRef.current
+      ) {
         void handleAbandon();
       }
       appStateRef.current = next;
@@ -90,8 +98,12 @@ export function MissionScreen({ navigation, route }: Props): React.JSX.Element {
       'Leave mission?',
       'If you leave now, you will lose 10 points.',
       [
-        { text: 'Keep playing', style: 'cancel' },
-        { text: 'Leave (-10)', style: 'destructive', onPress: () => void handleAbandon() },
+        {text: 'Keep playing', style: 'cancel'},
+        {
+          text: 'Leave (-10)',
+          style: 'destructive',
+          onPress: () => void handleAbandon(),
+        },
       ],
     );
   };
@@ -121,11 +133,12 @@ export function MissionScreen({ navigation, route }: Props): React.JSX.Element {
         ]);
       } catch (err) {
         setSubmitting(false);
-        if (err instanceof ApiHttpError && err.status === 409) {
+        const decision = decideCompletionFailure(err);
+        if (decision.action === 'alreadyFinished') {
           settledRef.current = true;
           Alert.alert(
-            'Mission already finished',
-            'This mission was already completed. You can close this screen.',
+            decision.title,
+            decision.message,
             [
               {
                 text: 'OK',
@@ -135,14 +148,39 @@ export function MissionScreen({ navigation, route }: Props): React.JSX.Element {
                 },
               },
             ],
+            {cancelable: false},
           );
           return;
         }
-        Alert.alert('Error', err instanceof Error ? err.message : String(err));
+        Alert.alert(
+          decision.title,
+          decision.message,
+          [
+            {
+              text: 'Retry',
+              onPress: () => void submitCompletionRef.current(payload),
+            },
+            {
+              text: 'Close',
+              style: 'cancel',
+              onPress: () => {
+                settledRef.current = true;
+                forceEndMissionCaptureSession();
+                navigation.goBack();
+              },
+            },
+          ],
+          {cancelable: false},
+        );
       }
     },
     [missionId, navigation, submitting],
   );
+
+  const submitCompletionRef = useRef(submitCompletion);
+  useEffect(() => {
+    submitCompletionRef.current = submitCompletion;
+  }, [submitCompletion]);
 
   return (
     <View style={styles.root}>
@@ -167,7 +205,9 @@ export function MissionScreen({ navigation, route }: Props): React.JSX.Element {
             <Text style={styles.pointsChipText}>+{points} pts</Text>
           </View>
           <View style={styles.typeChip}>
-            <Text style={styles.typeChipText}>{missionType.replace('_', ' ')}</Text>
+            <Text style={styles.typeChipText}>
+              {missionType.replace('_', ' ')}
+            </Text>
           </View>
         </View>
 
@@ -177,14 +217,14 @@ export function MissionScreen({ navigation, route }: Props): React.JSX.Element {
               metadata={metadata}
               points={points}
               age={null}
-              onComplete={(payload) => void submitCompletion(payload)}
+              onComplete={payload => void submitCompletion(payload)}
               onQuit={confirmQuit}
             />
           ) : (
             <Pressable
               style={styles.primaryBtn}
               disabled={submitting}
-              onPress={() => void submitCompletion({ confirmed: true })}>
+              onPress={() => void submitCompletion({confirmed: true})}>
               <Text style={styles.primaryBtnText}>Mark as done</Text>
             </Pressable>
           )}
@@ -199,9 +239,13 @@ export function MissionScreen({ navigation, route }: Props): React.JSX.Element {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: focus.bg },
-  content: { padding: 20, paddingTop: 44, paddingBottom: 40 },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  root: {flex: 1, backgroundColor: focus.bg},
+  content: {padding: 20, paddingTop: 44, paddingBottom: 40},
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
   badge: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -211,8 +255,18 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     borderRadius: 999,
   },
-  badgeDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: focus.amber },
-  badgeText: { color: focus.amber, fontSize: 11, fontWeight: '800', letterSpacing: 1.2 },
+  badgeDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: focus.amber,
+  },
+  badgeText: {
+    color: focus.amber,
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 1.2,
+  },
   quitBtn: {
     borderWidth: 1,
     borderColor: focus.border,
@@ -220,26 +274,38 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     borderRadius: 999,
   },
-  quit: { color: focus.coral, fontWeight: '700', fontSize: 13 },
-  title: { color: focus.text, fontSize: 26, fontWeight: '800', marginTop: 18, letterSpacing: -0.5 },
-  desc: { color: focus.textMuted, fontSize: 15, marginTop: 8, lineHeight: 22 },
-  chips: { flexDirection: 'row', gap: 8, marginTop: 16 },
+  quit: {color: focus.coral, fontWeight: '700', fontSize: 13},
+  title: {
+    color: focus.text,
+    fontSize: 26,
+    fontWeight: '800',
+    marginTop: 18,
+    letterSpacing: -0.5,
+  },
+  desc: {color: focus.textMuted, fontSize: 15, marginTop: 8, lineHeight: 22},
+  chips: {flexDirection: 'row', gap: 8, marginTop: 16},
   pointsChip: {
     backgroundColor: focus.accentStrong,
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 999,
   },
-  pointsChipText: { color: '#FFFFFF', fontWeight: '800', fontSize: 13 },
+  pointsChipText: {color: '#FFFFFF', fontWeight: '800', fontSize: 13},
   typeChip: {
     backgroundColor: focus.surface,
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 999,
   },
-  typeChipText: { color: focus.textMuted, fontWeight: '700', fontSize: 13 },
-  gameArea: { marginTop: 28, alignItems: 'center' },
-  warning: { color: focus.textMuted, fontSize: 12.5, marginTop: 28, lineHeight: 20, textAlign: 'center' },
+  typeChipText: {color: focus.textMuted, fontWeight: '700', fontSize: 13},
+  gameArea: {marginTop: 28, alignItems: 'center'},
+  warning: {
+    color: focus.textMuted,
+    fontSize: 12.5,
+    marginTop: 28,
+    lineHeight: 20,
+    textAlign: 'center',
+  },
   primaryBtn: {
     marginTop: 8,
     backgroundColor: focus.accentStrong,
@@ -248,5 +314,5 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     alignItems: 'center',
   },
-  primaryBtnText: { color: '#FFFFFF', fontSize: 16, fontWeight: '700' },
+  primaryBtnText: {color: '#FFFFFF', fontSize: 16, fontWeight: '700'},
 });
