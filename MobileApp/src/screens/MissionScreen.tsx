@@ -122,15 +122,20 @@ export function MissionScreen({navigation, route}: Props): React.JSX.Element {
           res.status === 'pending_approval'
             ? res.message ?? 'Waiting for parent approval'
             : `+${awarded} points! Total: ${res.totalPoints}`;
-        Alert.alert('Mission', message, [
-          {
-            text: 'OK',
-            onPress: () => {
-              forceEndMissionCaptureSession();
-              navigation.goBack();
+        Alert.alert(
+          'Mission',
+          message,
+          [
+            {
+              text: 'OK',
+              onPress: () => {
+                forceEndMissionCaptureSession();
+                navigation.goBack();
+              },
             },
-          },
-        ]);
+          ],
+          {cancelable: false},
+        );
       } catch (err) {
         setSubmitting(false);
         const decision = decideCompletionFailure(err);
