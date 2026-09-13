@@ -45,6 +45,17 @@ public class OverlayService extends Service {
     @Nullable
     private View overlayView;
 
+    /**
+     * ALL_IS_FIXED #46: cancels a pending answer-feedback "advance to next question" callback
+     * (see {@link OverlayQuizHelper#showQuiz}) if the overlay is torn down while that hold is
+     * pending — otherwise it would fire against detached views or double-complete the
+     * mission. Set at the {@code onStartQuiz} call site below, invoked and cleared by both
+     * removal paths ({@link #removeOverlayNow()} and {@link #removeOverlay()}) before they
+     * detach the view — mirrors the existing {@link #overlayView} field pattern.
+     */
+    @Nullable
+    private Runnable pendingQuizCancel;
+
     @Nullable
     public static OverlayService getRunningInstance() {
         return runningInstance;
@@ -119,7 +130,8 @@ public class OverlayService extends Service {
                                                 String quizTitle,
                                                 int quizPoints,
                                                 String meta) {
-                                            OverlayQuizHelper.showQuiz(
+                                            pendingQuizCancel =
+                                                    OverlayQuizHelper.showQuiz(
                                                     OverlayService.this,
                                                     overlayRoot,
                                                     id,
@@ -258,9 +270,19 @@ public class OverlayService extends Service {
         }
     }
 
+    /** Cancels any pending quiz answer-feedback advance before the view it targets is torn
+     * down (ALL_IS_FIXED #46) — the single place both removal paths funnel through. */
+    private void cancelPendingQuizAdvance() {
+        if (pendingQuizCancel != null) {
+            pendingQuizCancel.run();
+            pendingQuizCancel = null;
+        }
+    }
+
     /** Synchronous remove on main thread — avoids racing addView with a posted remove. */
     private void removeOverlayNow() {
         if (Looper.myLooper() == Looper.getMainLooper()) {
+            cancelPendingQuizAdvance();
             if (windowManager != null && overlayView != null) {
                 OverlayWindowHelper.detach(windowManager, overlayView);
                 overlayView = null;
@@ -269,6 +291,7 @@ public class OverlayService extends Service {
         }
         mainHandler.post(
                 () -> {
+                    cancelPendingQuizAdvance();
                     if (windowManager != null && overlayView != null) {
                         OverlayWindowHelper.detach(windowManager, overlayView);
                         overlayView = null;
@@ -278,6 +301,7 @@ public class OverlayService extends Service {
 
     public void removeOverlay() {
         if (Looper.myLooper() == Looper.getMainLooper()) {
+            cancelPendingQuizAdvance();
             if (windowManager != null && overlayView != null) {
                 OverlayWindowHelper.detach(windowManager, overlayView);
                 overlayView = null;
@@ -285,6 +309,7 @@ public class OverlayService extends Service {
         } else {
             mainHandler.post(
                     () -> {
+                        cancelPendingQuizAdvance();
                         if (windowManager != null && overlayView != null) {
                             OverlayWindowHelper.detach(windowManager, overlayView);
                             overlayView = null;

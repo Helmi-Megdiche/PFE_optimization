@@ -114,15 +114,26 @@ public final class OverlayWindowHelper {
     LayoutInflater inflater = LayoutInflater.from(context);
     View root = inflater.inflate(R.layout.overlay_mission, null);
 
+    // ALL_IS_FIXED #46: insets installed exactly once, on this exact root view (F1) — it's
+    // the same View object OverlayQuizHelper/OverlayTicTacToeHelper removeAllViews() and
+    // rebuild into when they take over, so this padding (and the root's own full-bleed
+    // background, set in overlay_mission.xml) survives that transition unreinstalled.
+    OverlayChrome.installInsetPadding(root);
+
     TextView titleView = root.findViewById(R.id.overlay_title);
     TextView descView = root.findViewById(R.id.overlay_description);
     TextView pointsView = root.findViewById(R.id.overlay_points);
     Button completeBtn = root.findViewById(R.id.overlay_btn_complete);
     Button laterBtn = root.findViewById(R.id.overlay_btn_later);
 
+    View card = root.findViewById(R.id.overlay_card);
+    if (card != null && card.getParent() instanceof View) {
+      OverlayChrome.applyMaxWidth(context, card, (View) card.getParent());
+    }
+
     titleView.setText(title);
     descView.setText(description);
-    pointsView.setText(points + " points · " + missionType);
+    pointsView.setText(OverlayChrome.captionText(points));
     completeBtn.setText(resolveCompleteLabel(context, missionType));
 
     final boolean[] actionSent = {false};

@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- ALL_IS_FIXED #46 — shared overlay chrome. Single source of truth for both the XML
+         prompt card (overlay_mission.xml) and the programmatic quiz/Tic-Tac-Toe surfaces
+         (OverlayChrome.java reads these same tokens via ContextCompat.getColor). -->
+    <color name="overlay_bg">#0F172A</color>
+    <color name="overlay_badge">#FBBF24</color>
+    <color name="overlay_title">#FFFFFF</color>
+    <color name="overlay_description">#CBD5E1</color>
+    <color name="overlay_caption">#CBD5E1</color>
+    <color name="overlay_warning">#F87171</color>
+    <color name="overlay_option_bg">#1E293B</color>
+    <color name="overlay_option_correct">#16A34A</color>
+    <color name="overlay_option_incorrect">#DC2626</color>
+    <color name="overlay_dot_active">#FBBF24</color>
+    <color name="overlay_dot_inactive">#334155</color>
+    <color name="overlay_btn_complete_bg">#2563EB</color>
+</resources>

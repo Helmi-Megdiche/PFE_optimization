@@ -1,7 +1,6 @@
 package com.mobileapp.overlay;
 
 import android.content.Context;
-import android.graphics.Color;
 import android.graphics.Typeface;
 import android.os.Handler;
 import android.os.Looper;
@@ -11,8 +10,11 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.LinearLayout;
-import android.widget.ScrollView;
 import android.widget.TextView;
+
+import androidx.core.content.ContextCompat;
+
+import com.mobileapp.R;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -146,50 +148,42 @@ public final class OverlayTicTacToeHelper {
         final Random random = new Random();
         final Handler mainHandler = new Handler(Looper.getMainLooper());
 
-        LinearLayout card = buildCard(context);
+        // ALL_IS_FIXED #46: restyled onto OverlayChrome's shared full-bleed/inset/max-width
+        // container — badge/title/points now come from the same factories/resources
+        // OverlayQuizHelper uses, so the two surfaces read as one product. No change below
+        // this point to board/turn/AI logic.
+        LinearLayout card = OverlayChrome.buildCenteredScrollColumn(context, rootGroup);
 
-        TextView badge = new TextView(context);
-        badge.setText(context.getString(com.mobileapp.R.string.overlay_mission_badge));
-        badge.setTextColor(Color.parseColor("#FBBF24"));
-        badge.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-        badge.setTypeface(null, Typeface.BOLD);
-        card.addView(badge);
+        card.addView(OverlayChrome.badgeView(context));
+        card.addView(OverlayChrome.titleView(context, title != null ? title : "Tic-Tac-Toe"));
 
-        TextView titleView = new TextView(context);
-        titleView.setText(title != null ? title : "Tic-Tac-Toe");
-        titleView.setTextColor(Color.WHITE);
-        titleView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20);
-        titleView.setTypeface(null, Typeface.BOLD);
-        titleView.setPadding(0, dp(context, 8), 0, 0);
-        card.addView(titleView);
-
-        TextView pointsView = new TextView(context);
-        pointsView.setText(points + " points · minigame");
-        pointsView.setTextColor(Color.parseColor("#94A3B8"));
-        pointsView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
-        pointsView.setPadding(0, dp(context, 8), 0, dp(context, 4));
+        TextView pointsView = OverlayChrome.captionView(context);
+        pointsView.setText(OverlayChrome.captionText(points));
+        pointsView.setPadding(
+                0, OverlayChrome.dp(context, 8), 0, OverlayChrome.dp(context, 4));
         card.addView(pointsView);
 
         final TextView statusView = new TextView(context);
         statusView.setText("Your turn (X)");
-        statusView.setTextColor(Color.parseColor("#94A3B8"));
+        statusView.setTextColor(ContextCompat.getColor(context, R.color.overlay_caption));
         statusView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
         statusView.setTypeface(null, Typeface.BOLD);
-        statusView.setPadding(0, dp(context, 4), 0, dp(context, 12));
+        statusView.setPadding(
+                0, OverlayChrome.dp(context, 4), 0, OverlayChrome.dp(context, 12));
         card.addView(statusView);
 
-        // Scroll-safe from the first line (§A2a) — the existing overlay card was measured
-        // overflowing at 1600x720 landscape; a 3x3 board plus status text is taller than a
-        // quiz question. This is the only layout work in this brief (not #46).
-        ScrollView scroll = new ScrollView(context);
+        // Scroll-safe from the first line (§A2a, #51) — the existing overlay card was
+        // measured overflowing at 1600x720 landscape; a 3x3 board plus status text is taller
+        // than a quiz question. ALL_IS_FIXED #46: the per-helper ScrollView this used to own
+        // is gone — OverlayChrome.buildCenteredScrollColumn's outer ScrollView now wraps the
+        // whole card (badge/title/points/status/board together), so gridWrap adds straight
+        // to `card` below. A ScrollView nested inside that outer one would fight it for
+        // gesture handling and, worse, collapse to zero height under the old
+        // height=0dp+weight=1 sizing once its parent (`card`) became wrap_content instead of
+        // a fixed-height container — caught rereading this rather than found on device.
         LinearLayout gridWrap = new LinearLayout(context);
         gridWrap.setOrientation(LinearLayout.VERTICAL);
         gridWrap.setGravity(Gravity.CENTER_HORIZONTAL);
-        scroll.addView(
-                gridWrap,
-                new LinearLayout.LayoutParams(
-                        LinearLayout.LayoutParams.MATCH_PARENT,
-                        LinearLayout.LayoutParams.WRAP_CONTENT));
 
         final Button[] cellButtons = new Button[9];
         LinearLayout[] rows = new LinearLayout[3];
@@ -209,7 +203,10 @@ public final class OverlayTicTacToeHelper {
                     for (int i = 0; i < 9; i++) {
                         Button b = cellButtons[i];
                         b.setText(board[i]);
-                        b.setTextColor("O".equals(board[i]) ? Color.parseColor("#F87171") : Color.WHITE);
+                        b.setTextColor(
+                                "O".equals(board[i])
+                                        ? ContextCompat.getColor(context, R.color.overlay_warning)
+                                        : ContextCompat.getColor(context, R.color.overlay_title));
                         b.setEnabled(!gameOver[0] && humanTurn[0] && "".equals(board[i]));
                         b.setAlpha(b.isEnabled() ? 1f : 0.85f);
                     }
@@ -268,13 +265,18 @@ public final class OverlayTicTacToeHelper {
             final int index = i;
             Button cellBtn = new Button(context);
             LinearLayout.LayoutParams cellLp =
-                    new LinearLayout.LayoutParams(dp(context, 88), dp(context, 88));
-            cellLp.setMargins(dp(context, 3), dp(context, 3), dp(context, 3), dp(context, 3));
+                    new LinearLayout.LayoutParams(
+                            OverlayChrome.dp(context, 88), OverlayChrome.dp(context, 88));
+            cellLp.setMargins(
+                    OverlayChrome.dp(context, 3),
+                    OverlayChrome.dp(context, 3),
+                    OverlayChrome.dp(context, 3),
+                    OverlayChrome.dp(context, 3));
             cellBtn.setAllCaps(false);
             cellBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 30);
-            cellBtn.setTextColor(Color.WHITE);
+            cellBtn.setTextColor(ContextCompat.getColor(context, R.color.overlay_title));
             cellBtn.setTypeface(null, Typeface.BOLD);
-            cellBtn.setBackgroundColor(Color.parseColor("#1E293B"));
+            cellBtn.setBackgroundColor(ContextCompat.getColor(context, R.color.overlay_option_bg));
             cellBtn.setOnClickListener(
                     v -> {
                         if (gameOver[0] || !humanTurn[0] || !"".equals(board[index])) {
@@ -297,34 +299,9 @@ public final class OverlayTicTacToeHelper {
 
         renderBoard[0].run();
         card.addView(
-                scroll,
+                gridWrap,
                 new LinearLayout.LayoutParams(
-                        LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
-
-        android.widget.FrameLayout.LayoutParams rootLp =
-                new android.widget.FrameLayout.LayoutParams(
-                        android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
-                        android.widget.FrameLayout.LayoutParams.MATCH_PARENT);
-        rootLp.gravity = Gravity.CENTER;
-        rootLp.setMargins(dp(context, 20), dp(context, 32), dp(context, 20), dp(context, 32));
-        if (rootGroup instanceof android.widget.FrameLayout) {
-            ((android.widget.FrameLayout) rootGroup).addView(card, rootLp);
-        } else {
-            rootGroup.addView(card);
-        }
-    }
-
-    private static LinearLayout buildCard(Context context) {
-        LinearLayout card = new LinearLayout(context);
-        card.setOrientation(LinearLayout.VERTICAL);
-        card.setBackgroundResource(com.mobileapp.R.drawable.overlay_mission_card);
-        card.setPadding(dp(context, 20), dp(context, 20), dp(context, 20), dp(context, 20));
-        card.setElevation(dp(context, 12));
-        return card;
-    }
-
-    private static int dp(Context context, int value) {
-        float density = context.getResources().getDisplayMetrics().density;
-        return Math.round(value * density);
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT));
     }
 }

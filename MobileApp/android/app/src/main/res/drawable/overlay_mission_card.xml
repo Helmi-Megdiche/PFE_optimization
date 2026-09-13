@@ -1,7 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <shape xmlns:android="http://schemas.android.com/apk/res/android"
     android:shape="rectangle">
-    <solid android:color="#0F172A" />
+    <!-- ALL_IS_FIXED #46: points at the same @color/overlay_bg token as the full-bleed
+         window background, so this panel's rounded corners are provably inert (not just
+         visually similar) rather than two independently-maintained hex literals. -->
+    <solid android:color="@color/overlay_bg" />
     <corners android:radius="16dp" />
     <padding
         android:bottom="8dp"

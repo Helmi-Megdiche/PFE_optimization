@@ -1,87 +1,120 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- ALL_IS_FIXED #46: full-bleed restyle. overlay_root is the single window root — its
+     background now IS the surface (opaque @color/overlay_bg, not a translucent scrim over
+     the launcher), and OverlayWindowHelper.attach() installs system-inset padding on this
+     exact view exactly once (F1). That padding only affects where children lay out, not
+     where this root's own background paints, so the background stays edge-to-edge while
+     content stays clear of the status/gesture bars. overlay_root is also the same View
+     object OverlayQuizHelper/OverlayTicTacToeHelper receive as overlayRoot and
+     removeAllViews() on when they take over — confirmed by reading both (F2) — so this
+     root's background+inset-padding persist across that transition without being
+     reinstalled. Every existing id below (overlay_title, overlay_description,
+     overlay_points, overlay_warning, overlay_btn_complete, overlay_btn_later, overlay_badge)
+     and the click-handler wiring in OverlayWindowHelper.attach() are unchanged — only the
+     container structure and the color/size literals moved to shared resources. -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/overlay_root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#CC000000"
+    android:background="@color/overlay_bg"
     android:clickable="true"
     android:focusable="true">
 
-    <LinearLayout
+    <ScrollView
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_gravity="center"
-        android:layout_marginHorizontal="24dp"
-        android:background="@drawable/overlay_mission_card"
-        android:elevation="12dp"
-        android:orientation="vertical"
-        android:padding="24dp">
+        android:layout_height="match_parent"
+        android:fillViewport="true">
 
-        <TextView
-            android:id="@+id/overlay_badge"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="@string/overlay_mission_badge"
-            android:textColor="#FBBF24"
-            android:textSize="12sp"
-            android:textStyle="bold" />
-
-        <TextView
-            android:id="@+id/overlay_title"
+        <!-- fillViewport + gravity=center: shorter-than-viewport content centers for free;
+             taller content overflows this match_parent-height container and the ScrollView
+             above scrolls it, which reads as top-aligned. Same idiom
+             OverlayTicTacToeHelper's ScrollView already uses for its own landscape fix. -->
+        <LinearLayout
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:textColor="#FFFFFF"
-            android:textSize="22sp"
-            android:textStyle="bold" />
+            android:layout_height="match_parent"
+            android:gravity="center"
+            android:orientation="vertical">
 
-        <TextView
-            android:id="@+id/overlay_description"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
-            android:lineSpacingExtra="4dp"
-            android:textColor="#CBD5E1"
-            android:textSize="16sp" />
+            <!-- overlay_card: width is clamped at runtime by
+                 OverlayChrome.applyMaxWidth(card, this-parent) to
+                 min(availableWidth, @dimen/overlay_content_max_width) and re-clamped on every
+                 layout pass (incl. rotation) — see OverlayWindowHelper.attach(). -->
+            <LinearLayout
+                android:id="@+id/overlay_card"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@drawable/overlay_mission_card"
+                android:elevation="12dp"
+                android:orientation="vertical"
+                android:padding="@dimen/overlay_card_padding">
 
-        <TextView
-            android:id="@+id/overlay_points"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            android:textColor="#94A3B8"
-            android:textSize="14sp" />
+                <TextView
+                    android:id="@+id/overlay_badge"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/overlay_mission_badge"
+                    android:textColor="@color/overlay_badge"
+                    android:textSize="@dimen/overlay_text_badge"
+                    android:textStyle="bold" />
 
-        <TextView
-            android:id="@+id/overlay_warning"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            android:lineSpacingExtra="4dp"
-            android:text="@string/overlay_mission_warning"
-            android:textColor="#F87171"
-            android:textSize="13sp" />
+                <TextView
+                    android:id="@+id/overlay_title"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/overlay_spacing_sm"
+                    android:textColor="@color/overlay_title"
+                    android:textSize="@dimen/overlay_text_title"
+                    android:textStyle="bold" />
 
-        <Button
-            android:id="@+id/overlay_btn_complete"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="24dp"
-            android:backgroundTint="#2563EB"
-            android:textAllCaps="false"
-            android:textColor="#FFFFFF"
-            android:textSize="16sp"
-            android:textStyle="bold" />
+                <TextView
+                    android:id="@+id/overlay_description"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/overlay_spacing_md"
+                    android:lineSpacingExtra="4dp"
+                    android:textColor="@color/overlay_description"
+                    android:textSize="@dimen/overlay_text_description" />
 
-        <Button
-            android:id="@+id/overlay_btn_later"
-            style="@style/Widget.AppCompat.Button.Borderless"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:text="@string/overlay_mission_later"
-            android:textAllCaps="false"
-            android:textColor="#94A3B8"
-            android:textSize="14sp" />
-    </LinearLayout>
+                <TextView
+                    android:id="@+id/overlay_points"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/overlay_spacing_lg"
+                    android:textColor="@color/overlay_caption"
+                    android:textSize="@dimen/overlay_text_caption" />
+
+                <TextView
+                    android:id="@+id/overlay_warning"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/overlay_spacing_lg"
+                    android:lineSpacingExtra="4dp"
+                    android:text="@string/overlay_mission_warning"
+                    android:textColor="@color/overlay_warning"
+                    android:textSize="@dimen/overlay_text_warning" />
+
+                <Button
+                    android:id="@+id/overlay_btn_complete"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/overlay_spacing_xl"
+                    android:backgroundTint="@color/overlay_btn_complete_bg"
+                    android:textAllCaps="false"
+                    android:textColor="@color/overlay_title"
+                    android:textSize="16sp"
+                    android:textStyle="bold" />
+
+                <Button
+                    android:id="@+id/overlay_btn_later"
+                    style="@style/Widget.AppCompat.Button.Borderless"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/overlay_spacing_sm"
+                    android:text="@string/overlay_mission_later"
+                    android:textAllCaps="false"
+                    android:textColor="@color/overlay_caption"
+                    android:textSize="@dimen/overlay_text_caption" />
+            </LinearLayout>
+        </LinearLayout>
+    </ScrollView>
 </FrameLayout>
