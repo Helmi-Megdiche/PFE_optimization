@@ -1,6 +1,7 @@
 package com.mobileapp.overlay;
 
 import android.content.Context;
+import android.content.res.ColorStateList;
 import android.graphics.Typeface;
 import android.os.Handler;
 import android.os.Looper;
@@ -276,7 +277,15 @@ public final class OverlayTicTacToeHelper {
             cellBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 30);
             cellBtn.setTextColor(ContextCompat.getColor(context, R.color.overlay_title));
             cellBtn.setTypeface(null, Typeface.BOLD);
-            cellBtn.setBackgroundColor(ContextCompat.getColor(context, R.color.overlay_option_bg));
+            // ALL_IS_FIXED #54, G3: same rounded-drawable-set-once mechanism as
+            // OverlayChrome.optionButton() -- setBackgroundColor would flatten the shape's
+            // corners. Cell fill never changes after creation (no per-cell recolor exists in
+            // this file), so a single tint call here is the whole of it, no setOptionState
+            // equivalent needed.
+            cellBtn.setBackgroundResource(R.drawable.overlay_option_shape);
+            cellBtn.setBackgroundTintList(
+                    ColorStateList.valueOf(
+                            ContextCompat.getColor(context, R.color.overlay_option_bg)));
             cellBtn.setOnClickListener(
                     v -> {
                         if (gameOver[0] || !humanTurn[0] || !"".equals(board[index])) {

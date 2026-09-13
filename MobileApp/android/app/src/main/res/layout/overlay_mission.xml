@@ -55,7 +55,9 @@
                     android:text="@string/overlay_mission_badge"
                     android:textColor="@color/overlay_badge"
                     android:textSize="@dimen/overlay_text_badge"
-                    android:textStyle="bold" />
+                    android:textStyle="bold"
+                    android:letterSpacing="0.109" /> <!-- ALL_IS_FIXED #54: MissionScreen.badgeText's real 1.2dp / 11sp -->
+
 
                 <TextView
                     android:id="@+id/overlay_title"
@@ -100,8 +102,8 @@
                     android:layout_marginTop="@dimen/overlay_spacing_xl"
                     android:backgroundTint="@color/overlay_btn_complete_bg"
                     android:textAllCaps="false"
-                    android:textColor="@color/overlay_title"
-                    android:textSize="16sp"
+                    android:textColor="@color/overlay_btn_text"
+                    android:textSize="@dimen/overlay_text_button"
                     android:textStyle="bold" />
 
                 <Button

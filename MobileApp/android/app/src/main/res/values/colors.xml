@@ -1,18 +1,30 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- ALL_IS_FIXED #46 — shared overlay chrome. Single source of truth for both the XML
-         prompt card (overlay_mission.xml) and the programmatic quiz/Tic-Tac-Toe surfaces
-         (OverlayChrome.java reads these same tokens via ContextCompat.getColor). -->
-    <color name="overlay_bg">#0F172A</color>
-    <color name="overlay_badge">#FBBF24</color>
-    <color name="overlay_title">#FFFFFF</color>
-    <color name="overlay_description">#CBD5E1</color>
-    <color name="overlay_caption">#CBD5E1</color>
-    <color name="overlay_warning">#F87171</color>
-    <color name="overlay_option_bg">#1E293B</color>
-    <color name="overlay_option_correct">#16A34A</color>
-    <color name="overlay_option_incorrect">#DC2626</color>
-    <color name="overlay_dot_active">#FBBF24</color>
-    <color name="overlay_dot_inactive">#334155</color>
-    <color name="overlay_btn_complete_bg">#2563EB</color>
+    <!-- ALL_IS_FIXED #54 — these values are the app's own "focus" design-system tokens
+         (MobileApp/src/theme/index.ts), not an overlay-invented palette (#46's original values
+         were invented without checking whether the app already had a theme — see the #54
+         closeout). Every value below is checked against MobileApp/__tests__/overlayThemeParity.test.ts,
+         which reads this file and fails loudly on an unmapped name. Single source of truth for
+         both the XML prompt card (overlay_mission.xml) and the programmatic quiz/Tic-Tac-Toe
+         surfaces (OverlayChrome.java reads these same tokens via ContextCompat.getColor). -->
+    <color name="overlay_bg">#122926</color> <!-- focus.bg -->
+    <color name="overlay_badge">#E7B85C</color> <!-- focus.amber -->
+    <color name="overlay_title">#F4EFE6</color> <!-- focus.text -->
+    <color name="overlay_description">#93B0A9</color> <!-- focus.textMuted -->
+    <color name="overlay_caption">#93B0A9</color> <!-- focus.textMuted -->
+    <color name="overlay_warning">#F07A5F</color> <!-- focus.coral -->
+    <color name="overlay_option_bg">#1C3A35</color> <!-- focus.surface -->
+    <color name="overlay_option_correct">#2E9E7B</color> <!-- focus.accentStrong -->
+    <color name="overlay_option_incorrect">#F07A5F</color> <!-- focus.coral -->
+    <color name="overlay_dot_active">#5FD3BE</color> <!-- focus.accent -->
+    <color name="overlay_dot_inactive">#2E5C54</color> <!-- focus.border -->
+    <!-- ALL_IS_FIXED #54, G3/H4: added because overlay_option_shape.xml's stroke needs it.
+         QuizScreen.option's real style has borderWidth:1/borderColor:focus.border, so the
+         rounded option/cell drawable matches that hairline rather than a bare fill. -->
+    <color name="overlay_border">#2E5C54</color> <!-- focus.border -->
+    <color name="overlay_btn_complete_bg">#2E9E7B</color> <!-- focus.accentStrong -->
+    <!-- Not a focus.* lookup: MissionScreen.primaryBtnText uses a literal '#FFFFFF', not
+         focus.text's warm white — the app itself treats button-on-accent text as pure white.
+         Named separately so the divergence from overlay_title/focus.text is deliberate. -->
+    <color name="overlay_btn_text">#FFFFFF</color>
 </resources>

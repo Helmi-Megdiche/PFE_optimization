@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- ALL_IS_FIXED #54, G3: rounded-rect background for quiz option buttons and Tic-Tac-Toe
+     cells. Set once via setBackgroundResource(); the actual fill color is applied at runtime
+     via setBackgroundTintList (see OverlayChrome.setOptionState / OverlayTicTacToeHelper's cell
+     creation) so the same drawable serves the NEUTRAL/CORRECT/INCORRECT states without ever
+     falling back to setBackgroundColor, which would flatten these corners again.
+     Stroke color/width match QuizScreen.tsx's real `option` style (borderWidth: 1,
+     borderColor: focus.border) — the app's own option rows have this hairline, so matching it
+     is adopting the design system, not decorating past it (H4). -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="@android:color/white" />
+    <stroke
+        android:width="1dp"
+        android:color="@color/overlay_border" />
+    <corners android:radius="@dimen/overlay_radius_option" />
+</shape>

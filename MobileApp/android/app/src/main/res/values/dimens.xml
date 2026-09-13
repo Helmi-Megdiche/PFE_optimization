@@ -1,25 +1,48 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- ALL_IS_FIXED #46 — shared overlay type scale / spacing. Read by overlay_mission.xml
-         directly and by OverlayChrome.java (getResources().getDimension...) for the two
-         programmatic surfaces. -->
-    <dimen name="overlay_text_badge">12sp</dimen>
-    <dimen name="overlay_text_title">20sp</dimen>
-    <dimen name="overlay_text_description">16sp</dimen>
-    <dimen name="overlay_text_caption">13sp</dimen>
-    <dimen name="overlay_text_warning">13sp</dimen>
-    <dimen name="overlay_text_question">17sp</dimen>
-    <dimen name="overlay_text_option">15sp</dimen>
-    <dimen name="overlay_text_progress_count">13sp</dimen>
+    <!-- ALL_IS_FIXED #54 — type sizes below are pinned to the app's real rendered values
+         (MissionScreen.tsx / QuizScreen.tsx's own hardcoded styles), NOT to theme/index.ts's
+         `type` scale — neither of those screens actually consumes `type.*` (it hardcodes
+         fontSize/fontWeight per role), so matching `type.*` would match a specification the app
+         itself doesn't follow. See the #54 closeout for the per-role evidence. These are
+         deliberately NOT covered by overlayThemeParity.test.ts (UNMAPPED_BY_DESIGN) — there is
+         no single theme-side source of truth for them to be checked against. Spacing/radius
+         below ARE covered by that test, against theme/index.ts's `spacing`/`radius`. -->
+    <dimen name="overlay_text_badge">11sp</dimen> <!-- MissionScreen.badgeText -->
+    <!-- Prompt card only (overlay_mission.xml's overlay_title) — this view is the overlay's
+         closest analogue to MissionScreen itself (no co-occurring question), so it takes
+         MissionScreen.title's real size directly. -->
+    <dimen name="overlay_text_title">26sp</dimen> <!-- MissionScreen.title -->
+    <!-- Quiz/Tic-Tac-Toe surfaces only (OverlayChrome.titleView()) — this title sits above a
+         question on one combined screen, unlike the app's two-step flow, so it must read as
+         secondary. No single real-app render matches this role directly; 18sp is a constructed
+         value chosen to sit clearly below overlay_text_question (21sp) while staying legible as
+         a title. Disclosed in the #54 closeout as the one non-evidence-sourced size here. -->
+    <dimen name="overlay_text_active_title">18sp</dimen>
+    <dimen name="overlay_text_description">15sp</dimen> <!-- MissionScreen.desc -->
+    <dimen name="overlay_text_caption">13sp</dimen> <!-- QuizScreen.progress -->
+    <dimen name="overlay_text_warning">12.5sp</dimen> <!-- MissionScreen.warning -->
+    <dimen name="overlay_text_question">21sp</dimen> <!-- QuizScreen.question -->
+    <dimen name="overlay_text_option">16sp</dimen> <!-- QuizScreen.optionText -->
+    <dimen name="overlay_text_progress_count">13sp</dimen> <!-- QuizScreen.progress -->
+    <!-- Was an inline android:textSize="16sp" literal on overlay_btn_complete, not a dimen. -->
+    <dimen name="overlay_text_button">16sp</dimen> <!-- MissionScreen.primaryBtnText -->
 
     <dimen name="overlay_spacing_xs">4dp</dimen>
     <dimen name="overlay_spacing_sm">8dp</dimen>
     <dimen name="overlay_spacing_md">12dp</dimen>
     <dimen name="overlay_spacing_lg">16dp</dimen>
+    <!-- Name collision, not a bug: this overlay-side "xl" is 24dp, which is the app's
+         spacing.xxl, not spacing.xl (20dp). The VALUE matches a real token; the label just
+         doesn't line up 1:1. Left as-is rather than renamed for symmetry. -->
     <dimen name="overlay_spacing_xl">24dp</dimen>
 
-    <dimen name="overlay_card_padding">24dp</dimen>
-    <dimen name="overlay_content_max_width">480dp</dimen>
+    <dimen name="overlay_card_padding">24dp</dimen> <!-- spacing.xxl -->
+    <dimen name="overlay_content_max_width">480dp</dimen> <!-- layout constant, not a design token -->
+
+    <!-- ALL_IS_FIXED #54, G3: exact match to QuizScreen.option's real borderRadius (14) =
+         theme/index.ts's radius.md. Used by the new overlay_option_shape.xml drawable. -->
+    <dimen name="overlay_radius_option">14dp</dimen>
 
     <dimen name="overlay_dot_size">8dp</dimen>
     <dimen name="overlay_dot_active_size">10dp</dimen>

@@ -1,6 +1,7 @@
 package com.mobileapp.overlay;
 
 import android.content.Context;
+import android.content.res.ColorStateList;
 import android.graphics.Typeface;
 import android.util.TypedValue;
 import android.view.Gravity;
@@ -174,14 +175,26 @@ public final class OverlayChrome {
         tv.setTextColor(ContextCompat.getColor(context, R.color.overlay_badge));
         setTextSizePx(tv, context, R.dimen.overlay_text_badge);
         tv.setTypeface(null, Typeface.BOLD);
+        // ALL_IS_FIXED #54: MissionScreen.badgeText's real letterSpacing (1.2dp at 11sp) is the
+        // only tracking value found anywhere in the app's real renders (QuizScreen/MissionScreen
+        // otherwise carry no letterSpacing at all). RN's letterSpacing is dp; Android's
+        // TextView#setLetterSpacing is em: 1.2 / 11 ~= 0.109em.
+        tv.setLetterSpacing(0.109f);
         return tv;
     }
 
+    /**
+     * Quiz/Tic-Tac-Toe surfaces only. ALL_IS_FIXED #54, H1: this title sits above a question on
+     * one combined overlay screen, unlike the app's two-step MissionScreen-then-QuizScreen flow,
+     * so it must read as secondary -- sized from overlay_text_active_title (18sp, a constructed
+     * value with no single real-app precedent), not overlay_text_title (26sp, reserved for the
+     * XML prompt card, the overlay's actual one-screen analogue of MissionScreen).
+     */
     public static TextView titleView(Context context, @Nullable String text) {
         TextView tv = new TextView(context);
         tv.setText(text != null ? text : "");
         tv.setTextColor(ContextCompat.getColor(context, R.color.overlay_title));
-        setTextSizePx(tv, context, R.dimen.overlay_text_title);
+        setTextSizePx(tv, context, R.dimen.overlay_text_active_title);
         tv.setTypeface(null, Typeface.BOLD);
         tv.setPadding(0, dp(context, 8), 0, 0);
         return tv;
@@ -215,11 +228,17 @@ public final class OverlayChrome {
         b.setText(text);
         b.setAllCaps(false);
         setTextSizePx(b, context, R.dimen.overlay_text_option);
+        // ALL_IS_FIXED #54, G3: rounded drawable set ONCE at creation; setOptionState below only
+        // re-tints it (setBackgroundTintList), never replaces it with setBackgroundColor -- that
+        // would flatten the corners straight back to a rectangle on every recolor.
+        b.setBackgroundResource(R.drawable.overlay_option_shape);
         setOptionState(b, OptionState.NEUTRAL);
         return b;
     }
 
-    /** Also used as the initial style (NEUTRAL) and as the answer-feedback recolor (§4). */
+    /** Also used as the initial style (NEUTRAL) and as the answer-feedback recolor (§4). Tints
+     * the rounded drawable installed by optionButton()/OverlayTicTacToeHelper's cell creation --
+     * does NOT call setBackgroundColor, which would replace that drawable with a flat fill. */
     public static void setOptionState(Button b, OptionState state) {
         int colorRes;
         switch (state) {
@@ -235,7 +254,8 @@ public final class OverlayChrome {
                 break;
         }
         b.setTextColor(ContextCompat.getColor(b.getContext(), R.color.overlay_title));
-        b.setBackgroundColor(ContextCompat.getColor(b.getContext(), colorRes));
+        b.setBackgroundTintList(
+                ColorStateList.valueOf(ContextCompat.getColor(b.getContext(), colorRes)));
     }
 
     /**
