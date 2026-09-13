@@ -44,37 +44,48 @@ export async function executeMissionAction(
   };
 }
 
-function buildCompletionPayload(
+export function buildCompletionPayload(
   missionType: string,
   metadata: Record<string, unknown>,
 ): MissionCompletionPayload {
   switch (missionType) {
     case 'real_world':
-      return { confirmed: true };
+      return {confirmed: true};
     case 'quiz': {
       const submitted = metadata.submittedAnswers as string[] | undefined;
       if (Array.isArray(submitted) && submitted.length > 0) {
-        return { answers: submitted };
+        return {answers: submitted};
       }
       const fromMeta = metadata.answers as string[] | undefined;
       if (Array.isArray(fromMeta) && fromMeta.length > 0) {
-        return { answers: fromMeta };
+        return {answers: fromMeta};
       }
-      return { answers: [] };
+      return {answers: []};
     }
     case 'cognitive': {
       const exercise = String(metadata.exercise ?? 'nback');
       if (exercise === 'reaction') {
-        return { reactionTimeMs: 250 };
+        return {reactionTimeMs: 250};
       }
       if (exercise === 'hanoi') {
-        return { moves: 7 };
+        return {moves: 7};
       }
-      return { exerciseScore: 100 };
+      return {exerciseScore: 100};
     }
-    case 'minigame':
-      return { won: true };
+    case 'minigame': {
+      const finalBoard = metadata.finalBoard as string[] | undefined;
+      const moveSequence = metadata.moveSequence as number[] | undefined;
+      if (Array.isArray(finalBoard) && Array.isArray(moveSequence)) {
+        return {finalBoard, moveSequence};
+      }
+      if (metadata.game === 'tictactoe') {
+        // No evidence to forward — do not fabricate `won: true`, the backend would refuse it
+        // anyway and this way its refusal reason says what was actually missing (#48/ALL_IS_FIXED-51).
+        return {};
+      }
+      return {won: true}; // sudoku and any other minigame — unchanged trust model
+    }
     default:
-      return { confirmed: true };
+      return {confirmed: true};
   }
 }

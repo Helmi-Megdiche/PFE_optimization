@@ -17,6 +17,8 @@ import android.widget.Toast;
 
 import com.mobileapp.R;
 
+import org.json.JSONObject;
+
 /**
  * Attaches/detaches the mission overlay WindowManager view (must run on main thread for add/remove).
  */
@@ -42,6 +44,13 @@ public final class OverlayWindowHelper {
             String missionType,
             String metadataJson);
 
+    void onStartTicTacToe(
+            android.view.View overlayRoot,
+            String missionId,
+            String title,
+            int points,
+            String metadataJson);
+
     void onComplete(String missionId, String missionType, String metadataJson);
 
     void onAbandon(String missionId, String missionType, String metadataJson);
@@ -51,6 +60,25 @@ public final class OverlayWindowHelper {
     return "quiz".equals(missionType)
         || "minigame".equals(missionType)
         || "cognitive".equals(missionType);
+  }
+
+  /**
+   * True iff {@code metadataJson} identifies the game as Tic-Tac-Toe (ALL_IS_FIXED #51 §A0:
+   * missionType alone can't distinguish tictactoe from sudoku — both are "minigame"). Never
+   * throws: a missing or unparseable metadata blob returns false, falling through to the
+   * ordinary onStartInAppMission hand-off — the same "never render a half-identified game"
+   * fallback OverlayQuizHelper already uses for a missing `questions` array.
+   */
+  private static boolean isTicTacToeGame(String metadataJson) {
+    if (metadataJson == null) {
+      return false;
+    }
+    try {
+      JSONObject meta = new JSONObject(metadataJson);
+      return "tictactoe".equals(meta.optString("game", null));
+    } catch (Exception e) {
+      return false;
+    }
   }
 
   public static boolean canDrawOverlay(Context context) {
@@ -108,6 +136,8 @@ public final class OverlayWindowHelper {
           setButtonsEnabled(completeBtn, laterBtn, false);
           if ("quiz".equals(missionType)) {
             listener.onStartQuiz(root, missionId, title, points, metadataJson);
+          } else if ("minigame".equals(missionType) && isTicTacToeGame(metadataJson)) {
+            listener.onStartTicTacToe(root, missionId, title, points, metadataJson);
           } else if (isPlayableMissionType(missionType)) {
             listener.onStartInAppMission(
                 missionId, title, description, points, missionType, metadataJson);

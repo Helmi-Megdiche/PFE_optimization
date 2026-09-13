@@ -10,7 +10,12 @@
  * instead of committing a second X against a stale board. Invariant: after any
  * exchange `|X| - |O|` is 0 or 1, never 2.
  */
-import { tttAiMove, tttWinner, type Difficulty, type TttBoard } from './gameLogic';
+import {
+  tttAiMove,
+  tttWinner,
+  type Difficulty,
+  type TttBoard,
+} from './gameLogic';
 
 export type TttPhase = 'human' | 'ai' | 'over';
 export type TttResult = 'X' | 'O' | 'draw';
@@ -19,16 +24,33 @@ export interface TttState {
   board: TttBoard;
   phase: TttPhase;
   winner: TttResult | null;
+  /** Cell indices played, in order — the evidence a completion is later replayed against. */
+  moveSequence: number[];
 }
 
-const EMPTY_BOARD: TttBoard = [null, null, null, null, null, null, null, null, null];
+const EMPTY_BOARD: TttBoard = [
+  null,
+  null,
+  null,
+  null,
+  null,
+  null,
+  null,
+  null,
+  null,
+];
 
 export function initialTttState(): TttState {
-  return { board: [...EMPTY_BOARD], phase: 'human', winner: null };
+  return {
+    board: [...EMPTY_BOARD],
+    phase: 'human',
+    winner: null,
+    moveSequence: [],
+  };
 }
 
 /** Mark tally — used by the component's status text and by the test invariants. */
-export function tttMarkCounts(board: TttBoard): { x: number; o: number } {
+export function tttMarkCounts(board: TttBoard): {x: number; o: number} {
   let x = 0;
   let o = 0;
   for (const cell of board) {
@@ -38,7 +60,7 @@ export function tttMarkCounts(board: TttBoard): { x: number; o: number } {
       o += 1;
     }
   }
-  return { x, o };
+  return {x, o};
 }
 
 function decided(board: TttBoard): TttResult | null {
@@ -47,9 +69,15 @@ function decided(board: TttBoard): TttResult | null {
 }
 
 /** Fold a board into a state: over if it is decided, otherwise `next` to play. */
-function resolve(board: TttBoard, next: TttPhase): TttState {
+function resolve(
+  board: TttBoard,
+  next: TttPhase,
+  moveSequence: number[],
+): TttState {
   const w = decided(board);
-  return w ? { board, phase: 'over', winner: w } : { board, phase: next, winner: null };
+  return w
+    ? {board, phase: 'over', winner: w, moveSequence}
+    : {board, phase: next, winner: null, moveSequence};
 }
 
 /**
@@ -62,7 +90,12 @@ export function applyHumanMove(state: TttState, index: number): TttState {
   }
   const pre = decided(state.board);
   if (pre) {
-    return { board: state.board, phase: 'over', winner: pre };
+    return {
+      board: state.board,
+      phase: 'over',
+      winner: pre,
+      moveSequence: state.moveSequence,
+    };
   }
   if (state.phase !== 'human') {
     return state;
@@ -72,7 +105,7 @@ export function applyHumanMove(state: TttState, index: number): TttState {
   }
   const board = [...state.board];
   board[index] = 'X';
-  return resolve(board, 'ai');
+  return resolve(board, 'ai', [...state.moveSequence, index]);
 }
 
 /**
@@ -86,13 +119,18 @@ export function applyAiMove(state: TttState, difficulty: Difficulty): TttState {
   }
   const pre = decided(state.board);
   if (pre) {
-    return { board: state.board, phase: 'over', winner: pre };
+    return {
+      board: state.board,
+      phase: 'over',
+      winner: pre,
+      moveSequence: state.moveSequence,
+    };
   }
   const aiIndex = tttAiMove(state.board, difficulty);
   if (aiIndex < 0 || aiIndex > 8 || state.board[aiIndex] != null) {
-    return resolve(state.board, 'human');
+    return resolve(state.board, 'human', state.moveSequence);
   }
   const board = [...state.board];
   board[aiIndex] = 'O';
-  return resolve(board, 'human');
+  return resolve(board, 'human', [...state.moveSequence, aiIndex]);
 }

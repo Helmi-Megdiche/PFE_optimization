@@ -1,4 +1,4 @@
-import { api } from './apiClient';
+import {api} from './apiClient';
 
 export interface MissionDto {
   id: string;
@@ -33,6 +33,10 @@ export interface MissionCompletionPayload {
   won?: boolean;
   completed?: boolean;
   confirmed?: boolean;
+  /** Tic-Tac-Toe evidence (ALL_IS_FIXED #51) — 9 cells, 'X' | 'O' | '' (empty), server-replayed. */
+  finalBoard?: string[];
+  /** Cell indices played, in order, alternating X (first) / O — replayed against finalBoard. */
+  moveSequence?: number[];
 }
 
 export interface CompleteMissionResponse {
@@ -64,14 +68,16 @@ export function getMissionById(missionId: string): Promise<MissionDto> {
   return api.get<MissionDto>(`/missions/${missionId}`);
 }
 
-export function getChildPoints(childId: string): Promise<{ childId: string; totalPoints: number }> {
+export function getChildPoints(
+  childId: string,
+): Promise<{childId: string; totalPoints: number}> {
   return api.get(`/missions/child/${childId}/points`);
 }
 
 export function suggestMission(payload: {
   category: string;
   textSnippet: string;
-}): Promise<{ id: string | null; created?: boolean }> {
+}): Promise<{id: string | null; created?: boolean}> {
   return api.post('/missions/suggest', payload);
 }
 
@@ -79,7 +85,10 @@ export function completeMission(
   missionId: string,
   body: MissionCompletionPayload,
 ): Promise<CompleteMissionResponse> {
-  return api.post<CompleteMissionResponse>(`/missions/${missionId}/complete`, body);
+  return api.post<CompleteMissionResponse>(
+    `/missions/${missionId}/complete`,
+    body,
+  );
 }
 
 export function abandonMission(
@@ -90,5 +99,5 @@ export function abandonMission(
   penalty: number;
   totalPoints: number;
 }> {
-  return api.post(`/missions/${missionId}/abandon`, { reason });
+  return api.post(`/missions/${missionId}/abandon`, {reason});
 }

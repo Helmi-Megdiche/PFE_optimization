@@ -184,6 +184,57 @@ public class OverlayService extends Service {
                                         }
 
                                         @Override
+                                        public void onStartTicTacToe(
+                                                android.view.View overlayRoot,
+                                                String id,
+                                                String t,
+                                                int pts,
+                                                String meta) {
+                                            OverlayTicTacToeHelper.showGame(
+                                                    OverlayService.this,
+                                                    overlayRoot,
+                                                    id,
+                                                    t,
+                                                    pts,
+                                                    meta,
+                                                    new OverlayTicTacToeHelper.GameFinishedListener() {
+                                                        @Override
+                                                        public void onGameFinished(
+                                                                String missionId,
+                                                                String type,
+                                                                String metadataJson) {
+                                                            OverlayEventBridge.emitMissionAction(
+                                                                    missionId,
+                                                                    "complete",
+                                                                    type,
+                                                                    metadataJson);
+                                                        }
+
+                                                        @Override
+                                                        public void onGameNeedsInApp(
+                                                                String missionId,
+                                                                String t2,
+                                                                int pts2,
+                                                                String type,
+                                                                String metadataJson) {
+                                                            OverlayMissionLauncher.launchMissionApp(
+                                                                    OverlayService.this,
+                                                                    missionId,
+                                                                    t2,
+                                                                    "",
+                                                                    pts2,
+                                                                    type,
+                                                                    metadataJson);
+                                                            OverlayEventBridge.emitMissionAction(
+                                                                    missionId,
+                                                                    "start",
+                                                                    type,
+                                                                    metadataJson);
+                                                        }
+                                                    });
+                                        }
+
+                                        @Override
                                         public void onComplete(
                                                 String id, String type, String meta) {
                                             OverlayEventBridge.emitMissionAction(

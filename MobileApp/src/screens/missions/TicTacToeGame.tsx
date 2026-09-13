@@ -1,22 +1,29 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, StyleSheet, Text, View, type ViewStyle } from 'react-native';
-import { type Difficulty } from '../../missions/games/gameLogic';
+import React, {useEffect, useMemo, useRef, useState} from 'react';
+import {Pressable, StyleSheet, Text, View, type ViewStyle} from 'react-native';
+import {type Difficulty} from '../../missions/games/gameLogic';
 import {
   applyAiMove,
   applyHumanMove,
   initialTttState,
 } from '../../missions/games/tttTurn';
-import { difficultyForGame, recordGameResult } from '../../missions/games/gameStats';
-import type { GameProps } from './gameTypes';
-import { scWarn } from '../../utils/screenCaptureLogger';
-import { focus } from '../../theme';
+import {
+  difficultyForGame,
+  recordGameResult,
+} from '../../missions/games/gameStats';
+import type {GameProps} from './gameTypes';
+import {scWarn} from '../../utils/screenCaptureLogger';
+import {focus} from '../../theme';
 
 /** Delay before the AI replies — reads as "thinking" and lets React commit the human move first. */
 const AI_MOVE_DELAY_MS = 450;
 /** Safety net: if the AI turn has not resolved this long after it began, force the move. */
 const AI_STALL_RECOVERY_MS = 3_000;
 
-export function TicTacToeGame({ metadata, age, onComplete }: GameProps): React.JSX.Element {
+export function TicTacToeGame({
+  metadata,
+  age,
+  onComplete,
+}: GameProps): React.JSX.Element {
   const [state, setState] = useState(initialTttState);
   const [difficulty, setDifficulty] = useState<Difficulty>(
     (metadata.aiDifficulty as Difficulty) ?? 'medium',
@@ -37,10 +44,10 @@ export function TicTacToeGame({ metadata, age, onComplete }: GameProps): React.J
     if (state.phase !== 'ai') {
       return undefined;
     }
-    const runAi = () => setState((s) => applyAiMove(s, difficulty));
+    const runAi = () => setState(s => applyAiMove(s, difficulty));
     const move = setTimeout(runAi, AI_MOVE_DELAY_MS);
     const recover = setTimeout(() => {
-      scWarn('[TicTacToe] AI turn stalled — forcing move', { difficulty });
+      scWarn('[TicTacToe] AI turn stalled — forcing move', {difficulty});
       runAi();
     }, AI_STALL_RECOVERY_MS);
     return () => {
@@ -60,8 +67,17 @@ export function TicTacToeGame({ metadata, age, onComplete }: GameProps): React.J
       score: childWon ? 100 : draw ? 50 : 0,
       highScore: childWon,
     });
-    onComplete({ won: childWon, completed: true });
-  }, [state.winner, onComplete]);
+    // finalBoard/moveSequence are the evidence the backend replays and verifies
+    // (ALL_IS_FIXED #51 Part B) — a terminal board is not usually full (a win normally
+    // leaves cells empty; only a draw fills all 9), so '' for empty is the common case here,
+    // not an edge case.
+    onComplete({
+      won: childWon,
+      completed: true,
+      finalBoard: state.board.map(c => c ?? ''),
+      moveSequence: state.moveSequence,
+    });
+  }, [state.winner, state.board, state.moveSequence, onComplete]);
 
   const status = useMemo(() => {
     if (state.winner === 'X') {
@@ -77,7 +93,7 @@ export function TicTacToeGame({ metadata, age, onComplete }: GameProps): React.J
   }, [state.winner, state.phase]);
 
   const playerMove = (index: number) => {
-    setState((s) => applyHumanMove(s, index));
+    setState(s => applyHumanMove(s, index));
   };
 
   return (
@@ -88,7 +104,9 @@ export function TicTacToeGame({ metadata, age, onComplete }: GameProps): React.J
       <View style={styles.grid}>
         {state.board.map((cell, i) => (
           <Pressable key={i} style={styles.cell} onPress={() => playerMove(i)}>
-            <Text style={[styles.mark, cell === 'O' && styles.markO]}>{cell ?? ''}</Text>
+            <Text style={[styles.mark, cell === 'O' && styles.markO]}>
+              {cell ?? ''}
+            </Text>
           </Pressable>
         ))}
       </View>
@@ -97,10 +115,10 @@ export function TicTacToeGame({ metadata, age, onComplete }: GameProps): React.J
 }
 
 const styles = StyleSheet.create({
-  wrap: { alignItems: 'center' },
-  title: { color: focus.text, fontSize: 22, fontWeight: '800' },
-  sub: { color: focus.textMuted, marginTop: 4 },
-  status: { color: focus.amber, fontSize: 16, marginTop: 12, fontWeight: '700' },
+  wrap: {alignItems: 'center'},
+  title: {color: focus.text, fontSize: 22, fontWeight: '800'},
+  sub: {color: focus.textMuted, marginTop: 4},
+  status: {color: focus.amber, fontSize: 16, marginTop: 12, fontWeight: '700'},
   grid: {
     marginTop: 20,
     width: 300,
@@ -119,8 +137,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  mark: { color: focus.accent, fontSize: 48, fontWeight: '800' },
-  markO: { color: focus.coral },
+  mark: {color: focus.accent, fontSize: 48, fontWeight: '800'},
+  markO: {color: focus.coral},
 });
 
 export const gridLayout: {grid: ViewStyle; cell: ViewStyle} = {
