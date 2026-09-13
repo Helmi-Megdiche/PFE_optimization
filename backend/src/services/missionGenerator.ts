@@ -166,12 +166,17 @@ export const MISSION_TEMPLATES: Record<string, MissionTemplate> = {
   },
 };
 
-const RISK_CATEGORY_TEMPLATES: Record<string, string[]> = {
+// ALL_IS_FIXED #51 Part C: 'nback' removed from the adult/violent risky-content pools —
+// 'nback' is a `cognitive` template with no native overlay surface (only the quiz and
+// tictactoe are overlay-native, real_world completes immediately), so a risky-content
+// mission could previously hand off out of the blocking overlay. It still runs for
+// high_addiction-triggered missions (a separate, untouched inline candidate list in
+// pickMissionTemplate below) — this only narrows the risky-content category pools.
+export const RISK_CATEGORY_TEMPLATES: Record<string, string[]> = {
   adult: [
     'quiz_safety',
     'conflict_resolution_quiz',
     'tictactoe',
-    'nback',
     'digital_detox',
     'educational_relationships',
   ],
@@ -180,7 +185,6 @@ const RISK_CATEGORY_TEMPLATES: Record<string, string[]> = {
     'conflict_resolution_quiz',
     'kindness_mission',
     'tictactoe',
-    'nback',
   ],
   toxic: ['positive_communication', 'empathy_exercise'],
   dangerous_challenge: ['safety_talk', 'parent_discussion'],

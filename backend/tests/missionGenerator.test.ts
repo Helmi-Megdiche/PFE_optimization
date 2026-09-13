@@ -4,6 +4,7 @@ import {
   generateMissionFromRisk,
   normalizeRiskCategory,
   MISSION_TEMPLATES,
+  RISK_CATEGORY_TEMPLATES,
 } from '../src/services/missionGenerator';
 
 jest.mock('../src/db/pool', () => ({
@@ -603,5 +604,75 @@ describe('expireStaleMissions integration', () => {
     await generateMissionForChild('child-2', { type: 'risky_content', score: 90 });
 
     expect(expireStaleMissions).toHaveBeenCalledWith('child-2');
+  });
+});
+
+describe('RISK_CATEGORY_TEMPLATES — ALL_IS_FIXED #51 Part C (nback removed from risky pools)', () => {
+  // The static guard (the one that matters): fails loudly the day someone adds a `cognitive`
+  // template or a non-tictactoe `minigame` to a risky pool — the actual failure mode this
+  // guards against, not an arithmetic check that quietly absorbs a new key.
+  function assertPoolIsOverlayRenderable(poolName: 'adult' | 'violent') {
+    for (const key of RISK_CATEGORY_TEMPLATES[poolName]) {
+      const template = MISSION_TEMPLATES[key];
+      expect(template).toBeDefined();
+      const isOverlayRenderable =
+        template.type === 'quiz' ||
+        template.type === 'real_world' ||
+        (template.type === 'minigame' && key === 'tictactoe');
+      expect(isOverlayRenderable).toBe(true);
+    }
+  }
+
+  it('every adult-pool template is overlay-native-playable (quiz, real_world, or tictactoe)', () => {
+    assertPoolIsOverlayRenderable('adult');
+  });
+
+  it('every violent-pool template is overlay-native-playable (quiz, real_world, or tictactoe)', () => {
+    assertPoolIsOverlayRenderable('violent');
+  });
+
+  it('nback is not in either risky-content pool', () => {
+    expect(RISK_CATEGORY_TEMPLATES.adult).not.toContain('nback');
+    expect(RISK_CATEGORY_TEMPLATES.violent).not.toContain('nback');
+  });
+
+  it('nback still runs for high_addiction-triggered missions — a separate, untouched inline list (C1.3)', () => {
+    jest.spyOn(Math, 'random').mockReturnValue(0);
+    try {
+      const { key } = pickMissionTemplate({
+        triggerReason: 'high_addiction',
+        triggerScore: 85,
+        addictionScore: 85,
+        wellbeingScore: 50,
+        age: 14,
+        recentTemplateKeys: [],
+      });
+      expect(['nback', 'tower', 'digital_detox']).toContain(key);
+    } finally {
+      jest.restoreAllMocks();
+    }
+  });
+
+  it('a distribution draw from the adult/violent pools never produces nback and only produces expected keys (not flaky — nback is structurally absent from the source array, not probabilistically avoided)', () => {
+    const baseInput = {
+      triggerReason: 'risky_content' as const,
+      triggerScore: 85,
+      addictionScore: 30,
+      wellbeingScore: 60,
+      combinedRiskScore: 85,
+      age: 11,
+      recentTemplateKeys: [] as string[],
+    };
+    const cases: Array<[string, string[]]> = [
+      ['adult', RISK_CATEGORY_TEMPLATES.adult],
+      ['gore', RISK_CATEGORY_TEMPLATES.violent], // normalizeRiskCategory('gore') -> 'violent'
+    ];
+    for (const [category, expectedKeys] of cases) {
+      for (let i = 0; i < 25; i += 1) {
+        const { key } = pickMissionTemplate({ ...baseInput, category });
+        expect(key).not.toBe('nback');
+        expect(expectedKeys).toContain(key);
+      }
+    }
   });
 });
