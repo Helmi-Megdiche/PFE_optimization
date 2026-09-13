@@ -14,6 +14,17 @@ export const completeMissionSchema = Joi.object({
   won: Joi.boolean().optional(),
   completed: Joi.boolean().optional(),
   confirmed: Joi.boolean().optional(),
+  // Tic-Tac-Toe evidence (ALL_IS_FIXED #51). Both stay .optional() here — this schema is
+  // shared flat across every mission type with no .when() conditionals — the actual
+  // enforcement (required + replayed + verified) lives in evaluateMissionCompletion's
+  // minigame/tictactoe branch, not in Joi. Distinct field names from `moves` (Hanoi's
+  // numeric move count) — same schema, different key, no collision.
+  //
+  // Joi.valid(...) deliberately, not Joi.string().valid(...): Joi.string() rejects '' by
+  // default, which would 400 every board containing an empty cell — i.e. most wins (a win
+  // normally leaves cells empty; only a draw fills the board).
+  finalBoard: Joi.array().items(Joi.valid('X', 'O', '')).length(9).optional(),
+  moveSequence: Joi.array().items(Joi.number().integer().min(0).max(8)).optional(),
 });
 
 export const generateMissionDevSchema = Joi.object({
