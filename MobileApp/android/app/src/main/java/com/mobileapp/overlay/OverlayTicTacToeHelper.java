@@ -120,7 +120,15 @@ public final class OverlayTicTacToeHelper {
         return empty.get(random.nextInt(empty.size()));
     }
 
-    public static void showGame(
+    /**
+     * @return a canceller {@link Runnable} the caller MUST invoke before tearing down the
+     *     overlay while the AI's ~450ms "thinking" delay may be pending (ALL_IS_FIXED #53) —
+     *     otherwise the posted move fires against detached views and, if it ends the game,
+     *     still dispatches a real mission completion for a board the child already left.
+     *     Mirrors {@link OverlayQuizHelper#showQuiz}'s canceller shape. A no-op for the early
+     *     return below (nothing was ever scheduled).
+     */
+    public static Runnable showGame(
             Context context,
             View overlayRoot,
             String missionId,
@@ -128,9 +136,10 @@ public final class OverlayTicTacToeHelper {
             int points,
             String metadataJson,
             GameFinishedListener listener) {
+        Runnable noopCanceller = () -> {};
         if (!(overlayRoot instanceof ViewGroup)) {
             listener.onGameNeedsInApp(missionId, title, points, "minigame", metadataJson);
-            return;
+            return noopCanceller;
         }
         ViewGroup rootGroup = (ViewGroup) overlayRoot;
         rootGroup.removeAllViews();
@@ -198,6 +207,10 @@ public final class OverlayTicTacToeHelper {
         final Runnable[] renderBoard = new Runnable[1];
         final Runnable[] finish = new Runnable[1];
         final Runnable[] aiTurn = new Runnable[1];
+        // ALL_IS_FIXED #53: the single instance posted/cancelled for the AI's delayed move.
+        // Created once here (not per-tap) so a stale posted instance can never become
+        // uncancellable if a second post were ever attempted before the first fired.
+        final Runnable[] pendingAiTurn = new Runnable[1];
 
         renderBoard[0] =
                 () -> {
@@ -261,6 +274,7 @@ public final class OverlayTicTacToeHelper {
                     statusView.setText("Your turn (X)");
                     renderBoard[0].run();
                 };
+        pendingAiTurn[0] = () -> aiTurn[0].run();
 
         for (int i = 0; i < 9; i++) {
             final int index = i;
@@ -300,7 +314,7 @@ public final class OverlayTicTacToeHelper {
                             return;
                         }
                         statusView.setText("AI is thinking…");
-                        mainHandler.postDelayed(() -> aiTurn[0].run(), AI_MOVE_DELAY_MS);
+                        mainHandler.postDelayed(pendingAiTurn[0], AI_MOVE_DELAY_MS);
                     });
             cellButtons[i] = cellBtn;
             rows[i / 3].addView(cellBtn, cellLp);
@@ -312,5 +326,11 @@ public final class OverlayTicTacToeHelper {
                 new LinearLayout.LayoutParams(
                         LinearLayout.LayoutParams.WRAP_CONTENT,
                         LinearLayout.LayoutParams.WRAP_CONTENT));
+
+        return () -> {
+            if (pendingAiTurn[0] != null) {
+                mainHandler.removeCallbacks(pendingAiTurn[0]);
+            }
+        };
     }
 }

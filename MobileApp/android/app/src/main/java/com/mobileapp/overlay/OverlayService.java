@@ -52,9 +52,24 @@ public class OverlayService extends Service {
      * mission. Set at the {@code onStartQuiz} call site below, invoked and cleared by both
      * removal paths ({@link #removeOverlayNow()} and {@link #removeOverlay()}) before they
      * detach the view — mirrors the existing {@link #overlayView} field pattern.
+     *
+     * {@code volatile} (ALL_IS_FIXED #53, A1): defensive hardening, not a fix for a
+     * demonstrated race — every read in the current call graph already happens on the main
+     * thread (either directly, or via {@code mainHandler.post(...)} when the caller isn't
+     * already on it), so there is no cross-thread read of this field today. Kept {@code
+     * volatile} anyway in case a future caller ever reads it off the main thread directly.
      */
     @Nullable
-    private Runnable pendingQuizCancel;
+    private volatile Runnable pendingQuizCancel;
+
+    /**
+     * ALL_IS_FIXED #53: same shape as {@link #pendingQuizCancel}, for
+     * {@link OverlayTicTacToeHelper#showGame}'s AI-move delay. A second field rather than a
+     * shared one — only one surface is ever live at a time, so sharing would work, but it
+     * would mean touching the already-device-verified quiz call sites for no behavioural gain.
+     */
+    @Nullable
+    private volatile Runnable pendingTttCancel;
 
     @Nullable
     public static OverlayService getRunningInstance() {
@@ -202,7 +217,8 @@ public class OverlayService extends Service {
                                                 String t,
                                                 int pts,
                                                 String meta) {
-                                            OverlayTicTacToeHelper.showGame(
+                                            pendingTttCancel =
+                                                    OverlayTicTacToeHelper.showGame(
                                                     OverlayService.this,
                                                     overlayRoot,
                                                     id,
@@ -279,10 +295,20 @@ public class OverlayService extends Service {
         }
     }
 
+    /** Cancels a pending Tic-Tac-Toe AI-move advance before the view it targets is torn down
+     * (ALL_IS_FIXED #53) — mirrors {@link #cancelPendingQuizAdvance()} exactly. */
+    private void cancelPendingTttAdvance() {
+        if (pendingTttCancel != null) {
+            pendingTttCancel.run();
+            pendingTttCancel = null;
+        }
+    }
+
     /** Synchronous remove on main thread — avoids racing addView with a posted remove. */
     private void removeOverlayNow() {
         if (Looper.myLooper() == Looper.getMainLooper()) {
             cancelPendingQuizAdvance();
+            cancelPendingTttAdvance();
             if (windowManager != null && overlayView != null) {
                 OverlayWindowHelper.detach(windowManager, overlayView);
                 overlayView = null;
@@ -292,6 +318,7 @@ public class OverlayService extends Service {
         mainHandler.post(
                 () -> {
                     cancelPendingQuizAdvance();
+                    cancelPendingTttAdvance();
                     if (windowManager != null && overlayView != null) {
                         OverlayWindowHelper.detach(windowManager, overlayView);
                         overlayView = null;
@@ -302,6 +329,7 @@ public class OverlayService extends Service {
     public void removeOverlay() {
         if (Looper.myLooper() == Looper.getMainLooper()) {
             cancelPendingQuizAdvance();
+            cancelPendingTttAdvance();
             if (windowManager != null && overlayView != null) {
                 OverlayWindowHelper.detach(windowManager, overlayView);
                 overlayView = null;
@@ -310,6 +338,7 @@ public class OverlayService extends Service {
             mainHandler.post(
                     () -> {
                         cancelPendingQuizAdvance();
+                        cancelPendingTttAdvance();
                         if (windowManager != null && overlayView != null) {
                             OverlayWindowHelper.detach(windowManager, overlayView);
                             overlayView = null;
