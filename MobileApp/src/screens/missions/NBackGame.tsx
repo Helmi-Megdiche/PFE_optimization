@@ -116,8 +116,7 @@ export function NBackGame({ metadata, onComplete }: GameProps): React.JSX.Elemen
         ]}
         disabled={finished || waitingForWarmup}
         onPress={onTapMatch}
-        hitSlop={12}
-        delayPressIn={0}>
+        hitSlop={12}>
         <Text style={styles.matchText}>{waitingForWarmup ? 'Wait…' : 'Match'}</Text>
       </Pressable>
     </View>

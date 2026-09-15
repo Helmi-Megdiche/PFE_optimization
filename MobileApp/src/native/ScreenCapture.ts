@@ -83,7 +83,7 @@ export const SCREEN_CAPTURE_EVENTS = {
   monitoringRevoked: 'onMonitoringRevoked',
 } as const;
 
-export interface ScreenCaptureDebugState {
+export type ScreenCaptureDebugState = {
   hasMediaProjection: boolean;
   isProjectionReady: boolean;
   isRunning: boolean;
@@ -92,7 +92,7 @@ export interface ScreenCaptureDebugState {
   hasForegroundService: boolean;
   hasPermissionPromise: boolean;
   intervalMs: number;
-}
+};
 
 const noopSubscription = { remove: () => undefined };
 

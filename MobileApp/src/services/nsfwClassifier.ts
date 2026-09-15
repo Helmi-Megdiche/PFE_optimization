@@ -7,13 +7,13 @@ import { Platform } from 'react-native';
 import { classifyNsfwNative, initNsfwModel } from '../native/NsfwTflite';
 import { scLog, scWarn } from '../utils/screenCaptureLogger';
 
-export interface NsfwProbabilities {
+export type NsfwProbabilities = {
   porn: number;
   sexy: number;
   hentai: number;
   neutral: number;
   drawing: number;
-}
+};
 
 export type NsfwSource = 'tflite' | 'unavailable';
 

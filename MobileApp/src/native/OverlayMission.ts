@@ -5,12 +5,12 @@ export const OVERLAY_MISSION_EVENTS = {
   PENDING_NOTIFICATION: 'onPendingNotificationMission',
 } as const;
 
-export interface OverlayMissionActionEvent {
+export type OverlayMissionActionEvent = {
   missionId: string;
   action: 'start' | 'complete' | 'abandon';
   missionType: string;
   metadataJson: string;
-}
+};
 
 interface OverlayMissionNativeModule {
   flushPendingOverlayEvents(): Promise<boolean>;
