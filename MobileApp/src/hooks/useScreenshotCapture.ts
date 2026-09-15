@@ -26,6 +26,7 @@ import {
   resolveFinalCategoryWithScore,
 } from '../utils/riskCombination';
 import {shouldCapFilteredSearchResults} from '../utils/riskySearchContext';
+import type {VisionRiskCategory} from '../types/imageClassification';
 import {
   computeAdaptiveIntervalMs,
   computeEffectiveAdaptiveInterval,
@@ -899,7 +900,7 @@ export function useScreenshotCapture(
 
         const tfliteNsfwScore = imageClassification.imageRiskScore;
         let combinedRiskScore: number;
-        let postProcessedCategory: string;
+        let postProcessedCategory: VisionRiskCategory;
 
         if (
           shouldCapFilteredSearchResults(cleanedForKeywords, tfliteNsfwScore, {
