@@ -20,6 +20,7 @@ import {withTimeout} from '../utils/withTimeout';
 import {
   addDetectedDomainForFrame,
   shouldShowBlockScreen,
+  shouldShowBrowserWarning,
 } from '../utils/browserBlockDecision';
 import {
   addDetectedDomain,
@@ -1070,7 +1071,6 @@ export function useScreenshotCapture(
             },
             {addDetectedDomain},
           );
-          browserAdult = browserAdd.qualifies;
           if (browserAdd.qualifies) {
             if (browserAdd.skipped) {
               scWarn('browser.add skipped', {reason: browserAdd.skipped});
@@ -1084,6 +1084,11 @@ export function useScreenshotCapture(
               });
             }
           }
+          browserAdult = shouldShowBrowserWarning({
+            qualifies: browserAdd.qualifies,
+            appPackage: attributionPackage,
+            listed: browserListed,
+          });
         } catch (browserErr) {
           scWarn('browser.add failed', browserErr);
         }

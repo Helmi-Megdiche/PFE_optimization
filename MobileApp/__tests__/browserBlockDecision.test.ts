@@ -3,6 +3,7 @@ import {
   resolveCaptureTimestampMs,
   shouldAddDetectedDomain,
   shouldShowBlockScreen,
+  shouldShowBrowserWarning,
 } from '../src/utils/browserBlockDecision';
 
 const chromeAdult = {
@@ -38,6 +39,9 @@ describe('shouldAddDetectedDomain (R4)', () => {
       false,
     );
     expect(shouldAddDetectedDomain({...chromeAdult, appPackage: null})).toBe(false);
+  });
+  it('lets an unknown package through (foreground lookup failed) - native attribution decides', () => {
+    expect(shouldAddDetectedDomain({...chromeAdult, appPackage: 'unknown'})).toBe(true);
   });
   it('rejects a missing adultScore', () => {
     expect(shouldAddDetectedDomain({...chromeAdult, adultScore: undefined})).toBe(false);
@@ -123,5 +127,20 @@ describe('shouldShowBlockScreen (A1/B9)', () => {
   });
   it('does not show when the domain is not listed', () => {
     expect(shouldShowBlockScreen({listed: false, presentedMission: false})).toBe(false);
+  });
+});
+
+describe('shouldShowBrowserWarning (B6)', () => {
+  it('shows for a known Chrome frame even when nothing was listed (duplicate/refused)', () => {
+    expect(
+      shouldShowBrowserWarning({qualifies: true, appPackage: 'com.android.chrome', listed: false}),
+    ).toBe(true);
+  });
+  it('for an unknown package needs native to have listed a host', () => {
+    expect(shouldShowBrowserWarning({qualifies: true, appPackage: 'unknown', listed: false})).toBe(false);
+    expect(shouldShowBrowserWarning({qualifies: true, appPackage: 'unknown', listed: true})).toBe(true);
+  });
+  it('never shows when R4 did not hold', () => {
+    expect(shouldShowBrowserWarning({qualifies: false, appPackage: 'com.android.chrome', listed: true})).toBe(false);
   });
 });

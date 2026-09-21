@@ -7,6 +7,7 @@ import android.os.SystemClock;
 import android.util.Log;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
+import android.view.accessibility.AccessibilityWindowInfo;
 
 import com.mobileapp.BuildConfig;
 import com.mobileapp.accessibility.browser.BrowserBlockController.AddOutcome;
@@ -68,6 +69,16 @@ public final class BrowserBlockRuntime {
     private final BrowserUrlWatcher.UrlBarReader reader = this::readUrlBar;
     private final Runnable reReadTask = this::reRead;
 
+    /**
+     * Device finding (Task 9): a covering overlay makes Chrome's window unreadable, so the block screen
+     * is shown only when the Back -> re-read -> Back -> HOME sequence has settled, never up front.
+     * Main thread only.
+     */
+    private String pendingBlockDomain;
+
+    private final File devMarker;
+    private boolean devStaticDisabled;
+
     private long lastNotLoadedLogMs = Long.MIN_VALUE / 2;
     private long ignoredCount;
     private long ignoredWindowStartMs = SystemClock.uptimeMillis();
@@ -78,6 +89,7 @@ public final class BrowserBlockRuntime {
         try (InputStream in = service.getAssets().open("never_block_domains.json")) {
             this.neverBlock = NeverBlockList.load(in);
         }
+        this.devMarker = new File(service.getFilesDir(), DevStaticSwitch.MARKER_FILE_NAME);
         this.lists =
                 new DomainLists(
                         neverBlock,
@@ -143,6 +155,7 @@ public final class BrowserBlockRuntime {
     public void shutdown() {
         shutDown = true;
         main.removeCallbacks(reReadTask);
+        pendingBlockDomain = null;
         writer.shutdown();
     }
 
@@ -161,6 +174,7 @@ public final class BrowserBlockRuntime {
             return;
         }
         noteListsNotLoaded();
+        applyDevSwitch();
         Decision d = watcher.onWindowContentChanged(pkg, reader, SystemClock.uptimeMillis());
         execute(d, event.getEventTime());
     }
@@ -169,6 +183,7 @@ public final class BrowserBlockRuntime {
     public void onWindowStateChanged(AccessibilityEvent event, String pkg) {
         if (BrowserBlockController.CHROME_PACKAGE.equals(pkg)) {
             noteListsNotLoaded();
+            applyDevSwitch();
         }
         Decision d = watcher.onWindowStateChanged(pkg, reader, SystemClock.uptimeMillis());
         execute(d, event.getEventTime());
@@ -191,6 +206,24 @@ public final class BrowserBlockRuntime {
                             + "s");
             ignoredCount = 0;
             ignoredWindowStartMs = now;
+        }
+    }
+
+    /**
+     * DEBUG BUILDS ONLY: a marker file in filesDir turns the static list off (device step 2). In a
+     * release build BuildConfig.DEBUG is a false compile-time constant, so the file is never read.
+     * Only Chrome events reach here, so this is at most a few File.exists() calls a second.
+     */
+    private void applyDevSwitch() {
+        if (!BuildConfig.DEBUG) {
+            return;
+        }
+        boolean disabled =
+                DevStaticSwitch.staticListDisabled(BuildConfig.DEBUG, devMarker.exists());
+        if (disabled != devStaticDisabled) {
+            devStaticDisabled = disabled;
+            lists.setStaticEnabled(!disabled);
+            Log.w(TAG, "DEV: static adult list " + (disabled ? "DISABLED" : "re-enabled"));
         }
     }
 
@@ -252,19 +285,13 @@ public final class BrowserBlockRuntime {
                         + " incident="
                         + d.emitIncident);
         if (d.enforcement == Enforcement.BACK_AND_BLOCK_SCREEN) {
-            requestBlockScreen(d);
+            pendingBlockDomain = d.incidentDomain;
         }
         if (d.emitIncident) {
             emitIncident(d);
         }
         main.removeCallbacks(reReadTask);
         main.postDelayed(reReadTask, REREAD_DELAY_MS);
-    }
-
-    /** Block screen via OverlayService; refused (logged) while a mission overlay is up. */
-    private void requestBlockScreen(Decision d) {
-        boolean shown = showBlockScreen();
-        Log.i(TAG, "block screen " + (shown ? "shown" : "refused") + " for " + d.incidentDomain);
     }
 
     /** From JS (A1/B9): a listed adult site whose mission was not presented. */
@@ -305,9 +332,17 @@ public final class BrowserBlockRuntime {
         if (shutDown) {
             return;
         }
-        BrowserUrlWatcher.UrlBarRead read = readUrlBar();
+        // Read Chrome's own window (not the active one): the active window can be a system or
+        // overlay surface. The block screen is not up yet (see pendingBlockDomain), so Chrome is readable.
+        BrowserUrlWatcher.UrlBarRead read = readChromeWindowUrlBar();
         String host = read == null ? null : HostNormalizer.fromUrlBar(read.text, read.focused);
         SequenceStep step = controller.onReRead(host, SystemClock.uptimeMillis());
+        Log.i(
+                TAG,
+                "browser.reread "
+                        + (read == null ? "chrome-window-unreadable" : host == null ? "no-host" : "host=" + host)
+                        + " step="
+                        + step);
         switch (step) {
             case BACK_AGAIN:
                 boolean back = service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK);
@@ -320,11 +355,52 @@ public final class BrowserBlockRuntime {
                 main.postDelayed(reReadTask, REREAD_DELAY_MS);
                 break;
             default:
+                showPendingBlockScreen();
                 break;
         }
     }
 
+    /** The sequence is over (Chrome left the blocked page, or Back/Back/HOME ran): now cover the screen. */
+    private void showPendingBlockScreen() {
+        String domain = pendingBlockDomain;
+        pendingBlockDomain = null;
+        if (domain != null && !shutDown) {
+            boolean shown = showBlockScreen();
+            Log.i(TAG, "block screen " + (shown ? "shown" : "refused") + " for " + domain);
+        }
+    }
+
     // ---- the one node read ------------------------------------------------------------------------
+
+    /**
+     * The address bar of Chrome's own window even when another window (our block screen) is on top.
+     * Only a window whose root package is Chrome is ever opened; every other window is skipped
+     * without reading a node.
+     */
+    private BrowserUrlWatcher.UrlBarRead readChromeWindowUrlBar() {
+        List<AccessibilityWindowInfo> windows = service.getWindows();
+        if (windows != null) {
+            for (AccessibilityWindowInfo w : windows) {
+                if (w == null) {
+                    continue;
+                }
+                AccessibilityNodeInfo root = w.getRoot();
+                if (root == null) {
+                    continue;
+                }
+                try {
+                    CharSequence pkg = root.getPackageName();
+                    if (pkg != null
+                            && BrowserBlockController.CHROME_PACKAGE.contentEquals(pkg)) {
+                        return readUrlBarFrom(root);
+                    }
+                } finally {
+                    root.recycle();
+                }
+            }
+        }
+        return null;
+    }
 
     /** Chrome's address bar text + focus, or null. Reads no other node; the text is never logged. */
     private BrowserUrlWatcher.UrlBarRead readUrlBar() {
@@ -333,6 +409,14 @@ public final class BrowserBlockRuntime {
             return null;
         }
         try {
+            return readUrlBarFrom(root);
+        } finally {
+            root.recycle();
+        }
+    }
+
+    private static BrowserUrlWatcher.UrlBarRead readUrlBarFrom(AccessibilityNodeInfo root) {
+        {
             List<AccessibilityNodeInfo> nodes = root.findAccessibilityNodeInfosByViewId(URL_BAR_ID);
             if (nodes == null || nodes.isEmpty()) {
                 return null;
@@ -346,8 +430,6 @@ public final class BrowserBlockRuntime {
                 n.recycle();
             }
             return read;
-        } finally {
-            root.recycle();
         }
     }
 }

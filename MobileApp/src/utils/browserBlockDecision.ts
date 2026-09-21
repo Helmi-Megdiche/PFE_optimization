@@ -8,6 +8,9 @@ import type {AddDetectedDomainResult} from '../native/SafeGuardAccessibility';
 
 export const CHROME_PACKAGE = 'com.android.chrome';
 
+/** The foreground lookup's "could not tell" value (UsageStats IPC failed or the cache went stale). */
+export const UNKNOWN_PACKAGE = 'unknown';
+
 /** The existing raw vision threshold (`nsfwClassifier.ADULT_THRESHOLD`). Not a new number. */
 export const ADULT_SCORE_THRESHOLD = 0.7;
 
@@ -20,6 +23,12 @@ export const ADD_DETECTED_TIMEOUT_MS = 500;
  * OCR. The RAW vision `adultScore` is the only pre-boost image signal. Known limits: real adult
  * frames scored 0.728-0.953, so 0.728 is close to the cut; drawn/animated content (hanime.tv,
  * 0.007-0.067) is a vision blind spot covered by the static list only.
+ *
+ * Package rule (device finding, Task 9 step 2): the UsageStats foreground lookup can fail on this ROM
+ * (frame logged `Foreground app { package: 'unknown' }` on a clear adult frame, NSFW 0.976), so
+ * 'unknown' must not veto the add. It is safe to defer to native: `addDetectedDomain` only ever
+ * blacklists the Chrome host recorded from the accessibility service at the capture time and refuses
+ * (`left_chrome` / `no_host`) if Chrome was not in front. A KNOWN non-Chrome package still vetoes.
  */
 export function shouldAddDetectedDomain(input: {
   finalCategory: string;
@@ -30,7 +39,7 @@ export function shouldAddDetectedDomain(input: {
     input.finalCategory === 'adult' &&
     typeof input.adultScore === 'number' &&
     input.adultScore >= ADULT_SCORE_THRESHOLD &&
-    input.appPackage === CHROME_PACKAGE
+    (input.appPackage === CHROME_PACKAGE || input.appPackage === UNKNOWN_PACKAGE)
   );
 }
 
@@ -96,6 +105,19 @@ export async function addDetectedDomainForFrame(
     return {qualifies: true, skipped: 'timeout', result: null};
   }
   return {qualifies: true, result};
+}
+
+/**
+ * B6: the mission overlay's adult-site warning. Certain when the package is Chrome; when the package
+ * was unknown the warning needs native to have actually listed a Chrome host (else it could show for
+ * adult content seen in another app).
+ */
+export function shouldShowBrowserWarning(input: {
+  qualifies: boolean;
+  appPackage: string | null | undefined;
+  listed: boolean;
+}): boolean {
+  return input.qualifies && (input.appPackage === CHROME_PACKAGE || input.listed);
 }
 
 /**

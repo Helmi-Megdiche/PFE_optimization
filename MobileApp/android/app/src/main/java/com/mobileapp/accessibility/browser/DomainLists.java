@@ -59,6 +59,8 @@ public final class DomainLists {
     private volatile Set<String> staticSet = Collections.emptySet();
     private volatile Set<String> dynamicSet = Collections.emptySet();
     private volatile boolean loaded;
+    /** Debug-only switch (see {@link DevStaticSwitch}); always true in a release build. */
+    private volatile boolean staticEnabled = true;
 
     public DomainLists(
             NeverBlockList neverBlock, File dynamicFile, Executor writer, Logger logger) {
@@ -111,6 +113,10 @@ public final class DomainLists {
         return out;
     }
 
+    public void setStaticEnabled(boolean enabled) {
+        staticEnabled = enabled;
+    }
+
     public boolean isLoaded() {
         return loaded;
     }
@@ -130,7 +136,8 @@ public final class DomainLists {
         if (!loaded) {
             return null;
         }
-        return DomainMatcher.match(host, staticSet, dynamicSet);
+        return DomainMatcher.match(
+                host, staticEnabled ? staticSet : Collections.<String>emptySet(), dynamicSet);
     }
 
     // ---- changes ---------------------------------------------------------------------------
