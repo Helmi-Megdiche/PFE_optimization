@@ -14,6 +14,8 @@ export const ACCESSIBILITY_EVENTS = {
   windowChanged: 'onAccessibilityWindowChanged',
   keyboardChanged: 'onAccessibilityKeyboardChanged',
   scroll: 'onAccessibilityScroll',
+  /** Phase B: an adult site was blocked. Host only. */
+  browserBlocked: 'onBrowserBlocked',
 } as const;
 
 export interface AccessibilityWindowChangedEvent {
@@ -32,7 +34,25 @@ export interface AccessibilityScrollEvent {
   timestamp: number;
 }
 
+/** Phase B: the host is the ONLY thing that ever leaves the address bar — never a path or query. */
+export interface BrowserBlockedEvent {
+  host: string;
+  listSource: 'static' | 'detected';
+  timestamp: number;
+}
+
+/** Outcome of asking native to attribute + blacklist the frame captured at a given time. */
+export interface AddDetectedDomainResult {
+  added: boolean;
+  /** True when the host is on a list after the call (added OR already there). */
+  listed: boolean;
+  reason: string;
+  host?: string;
+}
+
 interface SafeGuardAccessibilityNativeModule {
+  addDetectedDomain(captureTimestampMs: number): Promise<AddDetectedDomainResult>;
+  showBrowserBlockScreen(): Promise<boolean>;
   isEnabled(): Promise<boolean>;
   openAccessibilitySettings(): Promise<boolean>;
   flushPendingEvents(): Promise<boolean>;
@@ -89,5 +109,36 @@ export async function flushPendingAccessibilityEvents(): Promise<void> {
     await mod.flushPendingEvents();
   } catch {
     // ignore
+  }
+}
+
+/**
+ * Phase B. Native resolves the Chrome host at `captureTimestampMs` from its own history and adds
+ * its registrable domain to the blacklist. Never rejects: any failure is reported as a refusal.
+ */
+export async function addDetectedDomain(
+  captureTimestampMs: number,
+): Promise<AddDetectedDomainResult> {
+  const mod = getSafeGuardAccessibilityModule();
+  if (!mod) {
+    return {added: false, listed: false, reason: 'module_unavailable'};
+  }
+  try {
+    return await mod.addDetectedDomain(captureTimestampMs);
+  } catch {
+    return {added: false, listed: false, reason: 'native_error'};
+  }
+}
+
+/** Phase B. Shows the block screen unless a mission overlay is up. Resolves whether it was shown. */
+export async function showBrowserBlockScreen(): Promise<boolean> {
+  const mod = getSafeGuardAccessibilityModule();
+  if (!mod) {
+    return false;
+  }
+  try {
+    return await mod.showBrowserBlockScreen();
+  } catch {
+    return false;
   }
 }

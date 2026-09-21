@@ -24,6 +24,16 @@ import com.mobileapp.R;
 public class OverlayService extends Service {
 
     public static final String ACTION_HIDE = "com.mobileapp.overlay.HIDE";
+    /** Phase B: show the "Inappropriate content" block screen (never over a mission). */
+    public static final String ACTION_SHOW_BLOCK = "com.mobileapp.overlay.SHOW_BLOCK";
+
+    /** Phase B (B6): the mission overlay shows a browser-adult warning line when true. */
+    public static final String EXTRA_BROWSER_ADULT = "browser_adult";
+
+    /** What the current overlay view is. A mission always wins over the block screen. */
+    public static final int KIND_NONE = 0;
+    public static final int KIND_MISSION = 1;
+    public static final int KIND_BLOCK = 2;
 
     public static final String EXTRA_MISSION_ID = "mission_id";
     public static final String EXTRA_TITLE = "title";
@@ -53,6 +63,9 @@ public class OverlayService extends Service {
      */
     @Nullable
     private volatile View overlayView;
+
+    /** Set with {@link #overlayView}, cleared wherever it is nulled. */
+    private volatile int overlayKind = KIND_NONE;
 
     /**
      * ALL_IS_FIXED #46: cancels a pending answer-feedback "advance to next question" callback
@@ -93,7 +106,13 @@ public class OverlayService extends Service {
      * time the overlay is shown over another app).
      */
     public boolean hasActiveOverlayView() {
-        return overlayView != null;
+        // A mission overlay only: the #58 lease backstop asks "is the MISSION still up?", and a
+        // Phase B block screen must never keep a stale mission lease alive.
+        return overlayView != null && overlayKind == KIND_MISSION;
+    }
+
+    public int getOverlayKind() {
+        return overlayView == null ? KIND_NONE : overlayKind;
     }
 
     @Override
@@ -112,6 +131,7 @@ public class OverlayService extends Service {
             stopSelf();
             return START_NOT_STICKY;
         }
+        boolean showBlock = intent != null && ACTION_SHOW_BLOCK.equals(intent.getAction());
 
         Notification notification = buildNotification();
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -123,10 +143,47 @@ public class OverlayService extends Service {
             startForeground(NOTIFICATION_ID, notification);
         }
 
-        if (intent != null) {
+        if (showBlock) {
+            showBlockScreen();
+        } else if (intent != null) {
             showOverlayFromIntent(intent);
         }
         return START_STICKY;
+    }
+
+    /** Phase B block screen. Refused (logged) if a mission overlay is up; replaces an older block screen. */
+    private void showBlockScreen() {
+        Runnable task =
+                () -> {
+                    if (overlayView != null && overlayKind == KIND_MISSION) {
+                        android.util.Log.i("OverlayService", "block screen refused: mission overlay is up");
+                        return;
+                    }
+                    removeOverlayNow();
+                    if (windowManager == null) {
+                        return;
+                    }
+                    View root =
+                            OverlayWindowHelper.attachBlock(
+                                    OverlayService.this,
+                                    windowManager,
+                                    () -> {
+                                        removeOverlayNow();
+                                        stopForeground(true);
+                                        stopSelf();
+                                    });
+                    overlayView = root;
+                    overlayKind = root != null ? KIND_BLOCK : KIND_NONE;
+                    if (root == null) {
+                        stopForeground(true);
+                        stopSelf();
+                    }
+                };
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            task.run();
+        } else {
+            mainHandler.post(task);
+        }
     }
 
     private void showOverlayFromIntent(Intent intent) {
@@ -136,6 +193,7 @@ public class OverlayService extends Service {
         int points = intent.getIntExtra(EXTRA_POINTS, 0);
         String missionType = intent.getStringExtra(EXTRA_MISSION_TYPE);
         String metadataJson = intent.getStringExtra(EXTRA_METADATA_JSON);
+        boolean browserAdult = intent.getBooleanExtra(EXTRA_BROWSER_ADULT, false);
 
         if (missionId == null) {
             return;
@@ -157,6 +215,7 @@ public class OverlayService extends Service {
                                     points,
                                     missionType != null ? missionType : "real_world",
                                     metadataJson != null ? metadataJson : "{}",
+                                    browserAdult,
                                     new OverlayWindowHelper.ActionListener() {
                                         @Override
                                         public void onStartQuiz(
@@ -297,6 +356,7 @@ public class OverlayService extends Service {
                                         }
                                     });
                     overlayView = root;
+                    overlayKind = root != null ? KIND_MISSION : KIND_NONE;
                 };
 
         if (Looper.myLooper() == Looper.getMainLooper()) {
@@ -332,6 +392,7 @@ public class OverlayService extends Service {
             if (windowManager != null && overlayView != null) {
                 OverlayWindowHelper.detach(windowManager, overlayView);
                 overlayView = null;
+overlayKind = KIND_NONE;
             }
             return;
         }
@@ -342,6 +403,7 @@ public class OverlayService extends Service {
                     if (windowManager != null && overlayView != null) {
                         OverlayWindowHelper.detach(windowManager, overlayView);
                         overlayView = null;
+overlayKind = KIND_NONE;
                     }
                 });
     }
@@ -353,6 +415,7 @@ public class OverlayService extends Service {
             if (windowManager != null && overlayView != null) {
                 OverlayWindowHelper.detach(windowManager, overlayView);
                 overlayView = null;
+overlayKind = KIND_NONE;
             }
         } else {
             mainHandler.post(
@@ -362,6 +425,7 @@ public class OverlayService extends Service {
                         if (windowManager != null && overlayView != null) {
                             OverlayWindowHelper.detach(windowManager, overlayView);
                             overlayView = null;
+overlayKind = KIND_NONE;
                         }
                     });
         }

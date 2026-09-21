@@ -14,6 +14,7 @@ import com.mobileapp.accessibility.browser.BrowserBlockController.Decision;
 import com.mobileapp.accessibility.browser.BrowserBlockController.Enforcement;
 import com.mobileapp.accessibility.browser.BrowserBlockController.OverlayKind;
 import com.mobileapp.accessibility.browser.BrowserBlockController.SequenceStep;
+import com.mobileapp.accessibility.AccessibilityEventBridge;
 import com.mobileapp.overlay.OverlayService;
 
 import java.io.File;
@@ -88,10 +89,20 @@ public final class BrowserBlockRuntime {
         this.watcher = new BrowserUrlWatcher(controller);
     }
 
-    /** What overlay is on screen. Refined by Task 7 once the block screen has its own kind. */
+    /** What overlay is on screen (the block screen has its own kind, so it never counts as a mission). */
     private static OverlayKind currentOverlayKind() {
         OverlayService s = OverlayService.getRunningInstance();
-        return s != null && s.hasActiveOverlayView() ? OverlayKind.MISSION : OverlayKind.NONE;
+        if (s == null) {
+            return OverlayKind.NONE;
+        }
+        switch (s.getOverlayKind()) {
+            case OverlayService.KIND_MISSION:
+                return OverlayKind.MISSION;
+            case OverlayService.KIND_BLOCK:
+                return OverlayKind.BLOCK;
+            default:
+                return OverlayKind.NONE;
+        }
     }
 
     // ---- loading --------------------------------------------------------------------------------
@@ -250,14 +261,44 @@ public final class BrowserBlockRuntime {
         main.postDelayed(reReadTask, REREAD_DELAY_MS);
     }
 
-    /** Task 7 shows the block screen through OverlayService; until then this only logs. */
+    /** Block screen via OverlayService; refused (logged) while a mission overlay is up. */
     private void requestBlockScreen(Decision d) {
-        Log.i(TAG, "block screen requested for " + d.incidentDomain);
+        boolean shown = showBlockScreen();
+        Log.i(TAG, "block screen " + (shown ? "shown" : "refused") + " for " + d.incidentDomain);
     }
 
-    /** Task 6 emits {@code onBrowserBlocked} through AccessibilityEventBridge; until then this only logs. */
+    /** From JS (A1/B9): a listed adult site whose mission was not presented. */
+    public boolean showBlockScreenFromJs() {
+        boolean shown = showBlockScreen();
+        Log.i(TAG, "block screen from JS " + (shown ? "shown" : "refused"));
+        return shown;
+    }
+
+    private boolean showBlockScreen() {
+        if (currentOverlayKind() == OverlayKind.MISSION) {
+            return false; // a mission always wins over the block screen
+        }
+        try {
+            android.content.Intent i = new android.content.Intent(service, OverlayService.class);
+            i.setAction(OverlayService.ACTION_SHOW_BLOCK);
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                service.startForegroundService(i);
+            } else {
+                service.startService(i);
+            }
+            return true;
+        } catch (Throwable t) {
+            Log.w(TAG, "block screen start failed", t);
+            return false;
+        }
+    }
+
+    /** {@code onBrowserBlocked {host, listSource, timestamp}} to JS (buffered, drop-oldest). Host only. */
     private void emitIncident(Decision d) {
-        Log.i(TAG, "incident domain=" + d.incidentDomain + " list=" + d.source);
+        AccessibilityEventBridge.emitBrowserBlocked(
+                d.incidentDomain,
+                d.source == null ? "detected" : d.source.name().toLowerCase(java.util.Locale.ROOT),
+                System.currentTimeMillis());
     }
 
     private void reRead() {

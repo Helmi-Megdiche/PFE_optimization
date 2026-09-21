@@ -100,6 +100,7 @@ public final class OverlayWindowHelper {
       int points,
       String missionType,
       String metadataJson,
+      boolean browserAdult,
       ActionListener listener) {
     if (!canDrawOverlay(context)) {
       Log.e(TAG, "attach blocked — SYSTEM_ALERT_WINDOW not granted");
@@ -123,6 +124,11 @@ public final class OverlayWindowHelper {
     TextView titleView = root.findViewById(R.id.overlay_title);
     TextView descView = root.findViewById(R.id.overlay_description);
     TextView pointsView = root.findViewById(R.id.overlay_points);
+    TextView browserWarning = root.findViewById(R.id.overlay_browser_warning);
+    if (browserWarning != null) {
+      // Phase B (B6): driven by the JS-side R4 condition, not by whether a domain was added.
+      browserWarning.setVisibility(browserAdult ? View.VISIBLE : View.GONE);
+    }
     Button completeBtn = root.findViewById(R.id.overlay_btn_complete);
     Button laterBtn = root.findViewById(R.id.overlay_btn_later);
 
@@ -167,6 +173,21 @@ public final class OverlayWindowHelper {
           listener.onAbandon(missionId, missionType, metadataJson);
         });
 
+    WindowManager.LayoutParams params = fullScreenParams();
+
+    try {
+      windowManager.addView(root, params);
+      Log.i(TAG, "overlay attached missionId=" + missionId);
+      return root;
+    } catch (Exception e) {
+      Log.e(TAG, "addView failed", e);
+      Toast.makeText(context, "Could not show mission overlay: " + e.getMessage(), Toast.LENGTH_LONG)
+          .show();
+      return null;
+    }
+  }
+
+  private static WindowManager.LayoutParams fullScreenParams() {
     int overlayType =
         Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
             ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
@@ -184,15 +205,59 @@ public final class OverlayWindowHelper {
                 | WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON,
             PixelFormat.TRANSLUCENT);
     params.gravity = Gravity.TOP | Gravity.START;
+    return params;
+  }
+
+  /**
+   * Phase B: the informational "Inappropriate content" screen. Same full-bleed chrome as the mission
+   * overlay (focus palette via OverlayChrome). No points, no penalty, no mission. Returns the root
+   * view, or null if the overlay permission is missing or addView failed.
+   */
+  public static View attachBlock(
+      Context context, WindowManager windowManager, Runnable onDismiss) {
+    if (!canDrawOverlay(context)) {
+      Log.e(TAG, "block screen blocked - SYSTEM_ALERT_WINDOW not granted");
+      return null;
+    }
+    android.widget.FrameLayout root = new android.widget.FrameLayout(context);
+    root.setBackgroundColor(androidx.core.content.ContextCompat.getColor(context, R.color.overlay_bg));
+    root.setClickable(true);
+    root.setFocusable(true);
+    OverlayChrome.installInsetPadding(root);
+
+    android.widget.LinearLayout card = OverlayChrome.buildCenteredScrollColumn(context, root);
+
+    TextView title = OverlayChrome.titleView(context, context.getString(R.string.overlay_block_title));
+    title.setTextSize(
+        android.util.TypedValue.COMPLEX_UNIT_PX,
+        context.getResources().getDimension(R.dimen.overlay_text_title));
+    card.addView(title);
+
+    TextView body = OverlayChrome.captionView(context);
+    body.setText(context.getString(R.string.overlay_block_body));
+    body.setTextColor(androidx.core.content.ContextCompat.getColor(context, R.color.overlay_description));
+    body.setTextSize(
+        android.util.TypedValue.COMPLEX_UNIT_PX,
+        context.getResources().getDimension(R.dimen.overlay_text_description));
+    body.setPadding(0, OverlayChrome.dp(context, 12), 0, OverlayChrome.dp(context, 20));
+    card.addView(body);
+
+    Button ok = new Button(context);
+    ok.setText(context.getString(R.string.overlay_block_ok));
+    ok.setAllCaps(false);
+    ok.setTextColor(androidx.core.content.ContextCompat.getColor(context, R.color.overlay_btn_text));
+    ok.setBackgroundTintList(
+        android.content.res.ColorStateList.valueOf(
+            androidx.core.content.ContextCompat.getColor(context, R.color.overlay_btn_complete_bg)));
+    ok.setOnClickListener(v -> onDismiss.run());
+    card.addView(ok);
 
     try {
-      windowManager.addView(root, params);
-      Log.i(TAG, "overlay attached missionId=" + missionId);
+      windowManager.addView(root, fullScreenParams());
+      Log.i(TAG, "block screen attached");
       return root;
     } catch (Exception e) {
-      Log.e(TAG, "addView failed", e);
-      Toast.makeText(context, "Could not show mission overlay: " + e.getMessage(), Toast.LENGTH_LONG)
-          .show();
+      Log.e(TAG, "block screen addView failed", e);
       return null;
     }
   }

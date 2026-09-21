@@ -26,6 +26,8 @@ public final class AccessibilityEventBridge {
     public static final String EVENT_WINDOW_CHANGED = "onAccessibilityWindowChanged";
     public static final String EVENT_KEYBOARD_CHANGED = "onAccessibilityKeyboardChanged";
     public static final String EVENT_SCROLL = "onAccessibilityScroll";
+    /** Phase B: {host, listSource, timestamp}. HOST ONLY — never a path, query or raw address-bar text. */
+    public static final String EVENT_BROWSER_BLOCKED = "onBrowserBlocked";
 
     /** Bounded buffer: keep at most this many pending events; drop the oldest when full. */
     private static final int MAX_PENDING = 20;
@@ -76,6 +78,14 @@ public final class AccessibilityEventBridge {
         map.putString("packageName", packageName);
         map.putDouble("timestamp", (double) timestamp);
         dispatch(EVENT_SCROLL, map);
+    }
+
+    public static void emitBrowserBlocked(String host, String listSource, long timestamp) {
+        WritableMap map = Arguments.createMap();
+        map.putString("host", host);
+        map.putString("listSource", listSource);
+        map.putDouble("timestamp", (double) timestamp);
+        dispatch(EVENT_BROWSER_BLOCKED, map);
     }
 
     private static synchronized void dispatch(String eventName, WritableMap params) {

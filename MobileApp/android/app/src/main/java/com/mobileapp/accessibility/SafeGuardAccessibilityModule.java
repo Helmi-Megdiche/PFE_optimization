@@ -12,6 +12,10 @@ import com.facebook.react.bridge.Promise;
 import com.facebook.react.bridge.ReactApplicationContext;
 import com.facebook.react.bridge.ReactContextBaseJavaModule;
 import com.facebook.react.bridge.ReactMethod;
+import com.facebook.react.bridge.Arguments;
+import com.facebook.react.bridge.WritableMap;
+import com.mobileapp.accessibility.browser.BrowserBlockController.AddOutcome;
+import com.mobileapp.accessibility.browser.BrowserBlockRuntime;
 import com.facebook.react.module.annotations.ReactModule;
 
 /**
@@ -87,6 +91,53 @@ public class SafeGuardAccessibilityModule extends ReactContextBaseJavaModule {
     public void flushPendingEvents(Promise promise) {
         AccessibilityEventBridge.flushPendingEvents(getReactApplicationContext());
         promise.resolve(true);
+    }
+
+    /**
+     * Phase B. Attribution + add for the frame captured at {@code captureTimestampMs} (wall-clock ms
+     * of the capture, never "now"). Resolves {added, listed, reason, host}: {@code listed} is true
+     * when the host is on a list after the call (added OR duplicate), and is what lets JS show the
+     * block screen when a mission was not presented. Never rejects for a refusal — the reason says why.
+     */
+    @ReactMethod
+    public void addDetectedDomain(double captureTimestampMs, Promise promise) {
+        try {
+            SafeGuardAccessibilityService svc = SafeGuardAccessibilityService.instance;
+            BrowserBlockRuntime b = svc == null ? null : svc.getBrowserBlocker();
+            WritableMap out = Arguments.createMap();
+            if (b == null) {
+                out.putBoolean("added", false);
+                out.putBoolean("listed", false);
+                out.putString("reason", "service_unavailable");
+                promise.resolve(out);
+                return;
+            }
+            AddOutcome o = b.addDetectedDomain((long) captureTimestampMs);
+            out.putBoolean("added", o.added);
+            out.putBoolean("listed", o.listed);
+            out.putString("reason", o.reason);
+            if (o.host != null) {
+                out.putString("host", o.host);
+            }
+            promise.resolve(out);
+        } catch (Throwable t) {
+            promise.reject("E_ADD_DETECTED", "addDetectedDomain failed", t);
+        }
+    }
+
+    /**
+     * Phase B (A1/B9). Shows the block screen through OverlayService unless a mission overlay is up.
+     * Resolves true if shown, false if refused (mission on screen / service unavailable).
+     */
+    @ReactMethod
+    public void showBrowserBlockScreen(Promise promise) {
+        try {
+            SafeGuardAccessibilityService svc = SafeGuardAccessibilityService.instance;
+            BrowserBlockRuntime b = svc == null ? null : svc.getBrowserBlocker();
+            promise.resolve(b != null && b.showBlockScreenFromJs());
+        } catch (Throwable t) {
+            promise.reject("E_SHOW_BLOCK", "showBrowserBlockScreen failed", t);
+        }
     }
 
     /** Required for NativeEventEmitter. */
