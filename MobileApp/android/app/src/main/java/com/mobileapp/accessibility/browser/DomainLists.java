@@ -72,7 +72,7 @@ public final class DomainLists {
 
     /** Loads the static asset and the dynamic file, then publishes both. Call off the main thread. */
     public void load(InputStream staticAsset) throws IOException {
-        Set<String> stat = readList(staticAsset, false);
+        Set<String> stat = readStaticList(staticAsset);
         Set<String> dyn = new HashSet<>();
         if (dynamicFile.exists()) {
             try (InputStream in = new FileInputStream(dynamicFile)) {
@@ -84,6 +84,14 @@ public final class DomainLists {
             dynamicSet = Collections.unmodifiableSet(dyn);
             loaded = true;
         }
+    }
+
+    /**
+     * The ~77k-entry static list is kept as hashes only ({@link HashedDomainSet}): a String set
+     * cost ~6.7 MB and 470-560 ms to build on the test device (R6).
+     */
+    private static Set<String> readStaticList(InputStream in) throws IOException {
+        return HashedDomainSet.fromLines(in);
     }
 
     private static Set<String> readList(InputStream in, boolean validate) throws IOException {
