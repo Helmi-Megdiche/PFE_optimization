@@ -115,6 +115,10 @@ dependencies {
     implementation("com.facebook.react:react-android")
     implementation("org.tensorflow:tensorflow-lite:2.14.0")
 
+    // JVM unit tests for the pure-Java browser-block logic (Phase B). Those classes import
+    // no android.* types, so they run on the plain JVM with no Robolectric/emulator.
+    testImplementation("junit:junit:4.13.2")
+
     if (hermesEnabled.toBoolean()) {
         implementation("com.facebook.react:hermes-android")
     } else {
