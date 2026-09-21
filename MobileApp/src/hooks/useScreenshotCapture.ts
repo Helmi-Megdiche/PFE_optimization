@@ -435,7 +435,10 @@ export function useScreenshotCapture(
    */
   const handleA11yWindowChanged = useCallback(
     (event: AccessibilityWindowChangedEvent) => {
-      checkMissionCaptureSessionBackstop();
+      // Fire-and-forget (ALL_IS_FIXED #58): on the 'overlay' source this may await a native
+      // liveness query before deciding to force-end, so a reclaim can land one event later than
+      // it used to (disclosed behavior change, C3) — nothing below depends on it settling first.
+      void checkMissionCaptureSessionBackstop();
       payOwedMissionCaptureResume();
       lastA11yWindowEventAtMs.current = Date.now();
       a11yHealthRef.current.onWindowEvent();

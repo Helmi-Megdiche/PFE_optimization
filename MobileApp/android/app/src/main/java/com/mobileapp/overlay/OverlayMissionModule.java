@@ -93,6 +93,18 @@ public class OverlayMissionModule extends ReactContextBaseJavaModule {
         }
     }
 
+    /**
+     * ALL_IS_FIXED #58: on-demand liveness query for the mission-capture-session backstop — an
+     * in-process static-field read, immediately resolved, no IPC/blocking I/O. Asked only when
+     * the backstop's soft staleness threshold trips, in place of a JS timer (which would freeze
+     * for the overlay's entire display duration).
+     */
+    @ReactMethod
+    public void isOverlayShowing(Promise promise) {
+        OverlayService instance = OverlayService.getRunningInstance();
+        promise.resolve(instance != null && instance.hasActiveOverlayView());
+    }
+
     /** Required for NativeEventEmitter. */
     @ReactMethod
     public void addListener(String eventName) {

@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useEffect, useRef } from 'react';
-import { Alert, AppState, Platform, ToastAndroid } from 'react-native';
+import {useEffect, useRef} from 'react';
+import {Alert, AppState, Platform, ToastAndroid} from 'react-native';
 import {
   flushPendingOverlayEvents,
   getOverlayMissionEmitter,
@@ -9,20 +9,20 @@ import {
   showMissionOverlay,
   type OverlayMissionActionEvent,
 } from '../native/OverlayMission';
-import { executeMissionAction } from '../missions/missionCompletion';
+import {executeMissionAction} from '../missions/missionCompletion';
 import {
   clearStaleNotificationMissionLaunch,
   tryOpenPendingNotificationMission,
 } from '../missions/missionNotificationLaunch';
-import { promptOverlayPermissionIfNeeded } from '../native/overlayPermission';
-import { navigateToMissionScreen } from '../navigation/navigationRef';
+import {promptOverlayPermissionIfNeeded} from '../native/overlayPermission';
+import {navigateToMissionScreen} from '../navigation/navigationRef';
 import {
   checkMissionCaptureSessionBackstop,
   forceEndMissionCaptureSession,
   payOwedMissionCaptureResume,
 } from '../utils/missionCaptureSession';
-import { ApiHttpError } from '../services/apiClient';
-import { scError, scLog, scWarn } from '../utils/screenCaptureLogger';
+import {ApiHttpError} from '../services/apiClient';
+import {scError, scLog, scWarn} from '../utils/screenCaptureLogger';
 
 function isMissionAlreadyFinishedError(err: unknown): boolean {
   if (err instanceof ApiHttpError && err.status === 409) {
@@ -58,8 +58,10 @@ async function dismissEnforcementOverlay(
   showBriefMessage(message);
 }
 
-function quizRetryMetadata(metadata: Record<string, unknown>): Record<string, unknown> {
-  const { submittedAnswers: _s, answers: _a, ...rest } = metadata;
+function quizRetryMetadata(
+  metadata: Record<string, unknown>,
+): Record<string, unknown> {
+  const {submittedAnswers: _s, answers: _a, ...rest} = metadata;
   return rest;
 }
 
@@ -68,7 +70,10 @@ const RESURFACED_BLOCK_MS = 2 * 60 * 1000;
 
 async function blockResurfacedMission(missionId: string): Promise<void> {
   const blockUntil = Date.now() + RESURFACED_BLOCK_MS;
-  await AsyncStorage.setItem(`${RESURFACED_BLOCK_PREFIX}${missionId}`, String(blockUntil));
+  await AsyncStorage.setItem(
+    `${RESURFACED_BLOCK_PREFIX}${missionId}`,
+    String(blockUntil),
+  );
 }
 
 function showBriefMessage(message: string): void {
@@ -79,10 +84,15 @@ function showBriefMessage(message: string): void {
   }
 }
 
-async function handleOverlayAction(event: OverlayMissionActionEvent): Promise<void> {
+async function handleOverlayAction(
+  event: OverlayMissionActionEvent,
+): Promise<void> {
   let metadata: Record<string, unknown> = {};
   try {
-    metadata = JSON.parse(event.metadataJson || '{}') as Record<string, unknown>;
+    metadata = JSON.parse(event.metadataJson || '{}') as Record<
+      string,
+      unknown
+    >;
   } catch {
     metadata = {};
   }
@@ -137,7 +147,9 @@ async function handleOverlayAction(event: OverlayMissionActionEvent): Promise<vo
     }
 
     if (event.action === 'abandon' && isAbandonNotAllowedError(err)) {
-      scLog('Abandon skipped — enforcement overlay only', { missionId: event.missionId });
+      scLog('Abandon skipped — enforcement overlay only', {
+        missionId: event.missionId,
+      });
       await dismissEnforcementOverlay(
         event.missionId,
         'Overlay dismissed for 2 minutes — stay on safe content.',
@@ -170,7 +182,7 @@ async function handleOverlayAction(event: OverlayMissionActionEvent): Promise<vo
     }
 
     const message = err instanceof Error ? err.message : String(err);
-    scWarn('Overlay mission action failed', { action: event.action, message });
+    scWarn('Overlay mission action failed', {action: event.action, message});
     clearStaleNotificationMissionLaunch();
     await hideMissionOverlay();
     forceEndMissionCaptureSession();
@@ -218,9 +230,12 @@ export function useMissionOverlayListener(): void {
       },
     );
 
-    const appStateSub = AppState.addEventListener('change', (next) => {
+    const appStateSub = AppState.addEventListener('change', next => {
       if (next === 'active') {
-        checkMissionCaptureSessionBackstop();
+        // Fire-and-forget (ALL_IS_FIXED #58): on the 'overlay' source this may await a native
+        // liveness query before deciding to force-end — a reclaim can land one event later than
+        // it used to (disclosed behavior change, C3); nothing below depends on it settling first.
+        void checkMissionCaptureSessionBackstop();
         payOwedMissionCaptureResume();
         void flushPendingOverlayEvents();
         openPending();

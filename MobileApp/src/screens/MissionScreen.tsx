@@ -22,6 +22,7 @@ import {focus} from '../theme';
 import {
   beginMissionCaptureSession,
   forceEndMissionCaptureSession,
+  startMissionCaptureSessionHeartbeat,
 } from '../utils/missionCaptureSession';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'MissionScreen'>;
@@ -43,6 +44,11 @@ export function MissionScreen({navigation, route}: Props): React.JSX.Element {
 
   useEffect(() => {
     beginMissionCaptureSession(missionId, 'screen');
+    // Safe only because the AppState listener below auto-abandons
+    // (forceEndMissionCaptureSession) after >3s out of foreground — this heartbeat can never go
+    // un-ticked longer than that without the mission ending itself first. If that grace period
+    // ever changes, re-check this assumption (ALL_IS_FIXED #58).
+    startMissionCaptureSessionHeartbeat(missionId);
     return () => {
       forceEndMissionCaptureSession();
     };

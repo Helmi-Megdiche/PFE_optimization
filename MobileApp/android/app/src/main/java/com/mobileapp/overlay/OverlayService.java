@@ -42,8 +42,17 @@ public class OverlayService extends Service {
 
     @Nullable
     private WindowManager windowManager;
+
+    /**
+     * ALL_IS_FIXED #58: {@code volatile} for the same cross-thread-visibility reason as
+     * {@link #pendingQuizCancel}/{@link #pendingTttCancel} below (#53) — written on the main
+     * thread (directly, or via {@code mainHandler.post(...)}), now also read from the RN
+     * native-modules thread by {@link #hasActiveOverlayView()}, which backs
+     * {@code OverlayMissionModule.isOverlayShowing()}, the mission-capture-session backstop's
+     * on-demand liveness query for the overlay path.
+     */
     @Nullable
-    private View overlayView;
+    private volatile View overlayView;
 
     /**
      * ALL_IS_FIXED #46: cancels a pending answer-feedback "advance to next question" callback
@@ -74,6 +83,17 @@ public class OverlayService extends Service {
     @Nullable
     public static OverlayService getRunningInstance() {
         return runningInstance;
+    }
+
+    /**
+     * ALL_IS_FIXED #58: backs {@code OverlayMissionModule.isOverlayShowing()} — an in-process,
+     * immediately-resolved liveness check the mission-capture-session backstop asks (from JS) only
+     * when its soft staleness threshold trips, instead of relying on a JS timer, which would
+     * freeze for the overlay's entire display duration (the RN host is backgrounded the whole
+     * time the overlay is shown over another app).
+     */
+    public boolean hasActiveOverlayView() {
+        return overlayView != null;
     }
 
     @Override
