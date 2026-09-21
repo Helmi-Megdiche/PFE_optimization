@@ -18,6 +18,14 @@ import {clearStaleNotificationMissionLaunch} from '../missions/missionNotificati
 import {presentMissionFromCapture} from '../missions/presentMissionFromCapture';
 import {withTimeout} from '../utils/withTimeout';
 import {
+  addDetectedDomainForFrame,
+  shouldShowBlockScreen,
+} from '../utils/browserBlockDecision';
+import {
+  addDetectedDomain,
+  showBrowserBlockScreen,
+} from '../native/SafeGuardAccessibility';
+import {
   applyExplicitOcrBoost,
   applyPostProcessingOverride,
   combineRiskScores,
@@ -1046,6 +1054,40 @@ export function useScreenshotCapture(
           return {success: false, skippedReason: 'stale'};
         }
 
+        // Phase B: attribute this frame to the Chrome host it was captured on and blacklist it. Runs
+        // BEFORE the POST so the domain is listed as early as possible; bounded to 500 ms (A7) and
+        // never allowed to break the pipeline. The capture time comes from the native frame event
+        // (never "now"); an add that cannot be attributed is refused natively and logged.
+        let browserAdult = false;
+        let browserListed = false;
+        try {
+          const browserAdd = await addDetectedDomainForFrame(
+            {
+              finalCategory,
+              adultScore: imageClassification.adultScore,
+              appPackage: attributionPackage,
+              event,
+            },
+            {addDetectedDomain},
+          );
+          browserAdult = browserAdd.qualifies;
+          if (browserAdd.qualifies) {
+            if (browserAdd.skipped) {
+              scWarn('browser.add skipped', {reason: browserAdd.skipped});
+            } else {
+              browserListed = browserAdd.result.listed;
+              scLog('browser.add', {
+                added: browserAdd.result.added,
+                listed: browserAdd.result.listed,
+                reason: browserAdd.result.reason,
+                host: browserAdd.result.host,
+              });
+            }
+          }
+        } catch (browserErr) {
+          scWarn('browser.add failed', browserErr);
+        }
+
         setPhase('api_post');
         const screenEventResponse = await withTimeout(
           postScreenEvent(payload),
@@ -1067,6 +1109,7 @@ export function useScreenshotCapture(
           return {success: true, skippedReason: 'stale'};
         }
 
+        let presentedMission = false;
         if (screenEventResponse.newMission?.id) {
           const nm = screenEventResponse.newMission;
           if (isLauncherPackage(attributionPackage)) {
@@ -1091,6 +1134,7 @@ export function useScreenshotCapture(
               title: nm.title,
               reSurfaced: nm.reSurfaced ?? false,
             });
+            presentedMission = true;
             void presentMissionFromCapture(
               {
                 missionId: nm.id,
@@ -1102,7 +1146,7 @@ export function useScreenshotCapture(
                 ),
                 metadata: (nm.metadata ?? {}) as Record<string, unknown>,
               },
-              {reSurfaced: nm.reSurfaced},
+              {reSurfaced: nm.reSurfaced, browserAdult},
             );
           } else {
             scLog('Mission presentation skipped — debounce or startup grace', {
@@ -1121,6 +1165,11 @@ export function useScreenshotCapture(
           scLog('Risky capture — no mission in API response', {
             combinedRiskScore,
           });
+        }
+        // Phase B (A1/B9): no mission took the child's screen (cooldown, launcher, grace, debounce...),
+        // so the block screen must. A mission, when presented, always wins over the block screen.
+        if (shouldShowBlockScreen({listed: browserListed, presentedMission})) {
+          void showBrowserBlockScreen();
         }
         setLastCaptureAt(payload.timestamp);
         coordinatorRef.current!.onFrameAccepted(Date.now());
