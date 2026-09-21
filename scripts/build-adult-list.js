@@ -99,13 +99,17 @@ function parse(text) {
 }
 
 async function main() {
-  const neverBlock = JSON.parse(fs.readFileSync(NEVER_BLOCK, 'utf8'));
+  const config = JSON.parse(fs.readFileSync(NEVER_BLOCK, 'utf8'));
+  const neverBlock = config.neverBlock;
+  // Shared-hosting platforms: an exact blog host (x.blogspot.com) is a legitimate list entry, but
+  // the bare platform (blogspot.com) would block every blog on it, so it is never listed.
+  const sharedSuffixes = new Set(config.exactHostOnly);
   const {upstreamDate, domains} = parse(await fetch(URL));
 
   let removed = 0;
   const kept = [];
   for (const d of domains) {
-    if (neverBlockCovers(neverBlock, d)) {
+    if (neverBlockCovers(neverBlock, d) || sharedSuffixes.has(d)) {
       removed++;
     } else {
       kept.push(d);
@@ -119,7 +123,7 @@ async function main() {
     `# Upstream commit: ${PINNED_COMMIT}`,
     `# Upstream date: ${upstreamDate}`,
     `# Entries: ${kept.length}`,
-    `# Removed because they are never-block domains or their subdomains: ${removed}`,
+    `# Removed because they are never-block domains (or subdomains) or a bare shared-hosting suffix: ${removed}`,
     '',
   ];
   fs.writeFileSync(OUT, header.join('\n') + kept.join('\n') + '\n', 'utf8');

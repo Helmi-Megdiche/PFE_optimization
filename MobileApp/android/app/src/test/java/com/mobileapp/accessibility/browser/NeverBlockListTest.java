@@ -57,6 +57,52 @@ public class NeverBlockListTest {
         assertFalse(list.covers(""));
     }
 
+    // ---- exactHostOnly (shared hosting) ---------------------------------------------------------
+
+    private static final String TWO_SECTIONS =
+            "{\n"
+                    + "  \"neverBlock\": [\"google.*\", \"bing.com\"],\n"
+                    + "  \"exactHostOnly\": [\"blogspot.com\", \"github.io\", \"sites.google.com\"]\n"
+                    + "}\n";
+
+    @Test
+    public void parseReadsBothSectionsAndKeepsThemApart() {
+        NeverBlockList parsed = NeverBlockList.parse(TWO_SECTIONS);
+        assertEquals(2, parsed.size());
+        assertEquals(3, parsed.exactHostOnlySize());
+        assertTrue(parsed.covers("bing.com"));
+        // A shared-hosting suffix is NOT a never-block domain: only the bare suffix is refused.
+        assertFalse(parsed.covers("x.blogspot.com"));
+        assertFalse(parsed.covers("github.io"));
+    }
+
+    @Test
+    public void sharedHostsAreTheSuffixAndEverythingUnderIt() {
+        NeverBlockList parsed = NeverBlockList.parse(TWO_SECTIONS);
+        assertTrue(parsed.isSharedHost("x.blogspot.com"));
+        assertTrue(parsed.isSharedHost("a.b.github.io"));
+        assertTrue(parsed.isSharedHost("blogspot.com"));
+        assertFalse(parsed.isSharedHost("blogspot.com.evil.net"));
+        assertFalse(parsed.isSharedHost("notblogspot.com"));
+        assertFalse(parsed.isSharedHost("example.com"));
+        assertFalse(parsed.isSharedHost(null));
+    }
+
+    @Test
+    public void onlyTheBareSuffixIsASharedSuffix() {
+        NeverBlockList parsed = NeverBlockList.parse(TWO_SECTIONS);
+        assertTrue(parsed.isSharedSuffix("blogspot.com"));
+        assertFalse(parsed.isSharedSuffix("x.blogspot.com"));
+        assertFalse(parsed.isSharedSuffix("example.com"));
+    }
+
+    @Test
+    public void aListWithoutSharedSectionHasNoSharedHosts() {
+        NeverBlockList plain = new NeverBlockList(Arrays.asList("bing.com"));
+        assertFalse(plain.isSharedHost("x.blogspot.com"));
+        assertEquals(0, plain.exactHostOnlySize());
+    }
+
     @Test
     public void parseReadsAFlatJsonArray() {
         NeverBlockList parsed =

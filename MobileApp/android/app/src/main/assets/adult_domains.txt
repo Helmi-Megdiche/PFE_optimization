@@ -3,7 +3,7 @@
 # Upstream commit: cb5daa41eadded64f169ffe9b0cdee7000540d7f
 # Upstream date: 20 September 2026 21:02:48 (UTC)
 # Entries: 76774
-# Removed because they are never-block domains or their subdomains: 1
+# Removed because they are never-block domains (or subdomains) or a bare shared-hosting suffix: 1
 0.oldgyhogola.com
 0.xd-cdn.com
 0.xxx-cdn.com

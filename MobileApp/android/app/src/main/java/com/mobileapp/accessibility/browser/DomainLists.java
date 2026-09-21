@@ -137,8 +137,13 @@ public final class DomainLists {
         if (h == null || reg == null) {
             return AddResult.REFUSED_INVALID;
         }
-        if (neverBlock.covers(h) || neverBlock.covers(reg)) {
+        if (neverBlock.covers(h) || neverBlock.covers(reg) || neverBlock.isSharedSuffix(h)) {
             return AddResult.REFUSED_NEVER_BLOCK;
+        }
+        // Shared hosting (blogspot, github.io, ...): every subdomain is someone else's site, so
+        // store the exact host. Storing the platform would block every blog on it.
+        if (neverBlock.isSharedHost(h)) {
+            reg = h;
         }
         synchronized (lock) {
             if (!loaded) {
@@ -162,7 +167,10 @@ public final class DomainLists {
         Set<String> next = new HashSet<>();
         for (String raw : hosts) {
             String h = HostNormalizer.toHost(raw);
-            if (h == null || DomainMatcher.registrable(h) == null || neverBlock.covers(h)) {
+            if (h == null
+                    || DomainMatcher.registrable(h) == null
+                    || neverBlock.covers(h)
+                    || neverBlock.isSharedSuffix(h)) {
                 continue;
             }
             next.add(h);

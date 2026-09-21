@@ -165,6 +165,78 @@ public class DomainListsTest {
         assertEquals(DomainMatcher.ListSource.DETECTED, lists.match("dyn-site.com").source);
     }
 
+    // ---- shared hosting: exact host only --------------------------------------------------------
+
+    private DomainLists newListsWithSharedHosting(File file) {
+        NeverBlockList nb =
+                new NeverBlockList(
+                        Arrays.asList("google.*", "bing.com"),
+                        Arrays.asList("blogspot.com", "github.io", "tumblr.com"));
+        return new DomainLists(nb, file, Runnable::run, msg -> {});
+    }
+
+    @Test
+    public void aSharedHostingSubdomainBlocksOnlyItself() throws IOException {
+        DomainLists lists = newListsWithSharedHosting(new File(tmp.getRoot(), "dyn.txt"));
+        lists.load(asset(""));
+        assertEquals(DomainLists.AddResult.ADDED, lists.addDetected("x.blogspot.com"));
+
+        assertEquals(Collections.singleton("x.blogspot.com"), lists.dynamicSnapshot());
+        assertNotNull(lists.match("x.blogspot.com"));
+        assertNotNull("its own subdomains are covered", lists.match("a.x.blogspot.com"));
+        assertNull("a sibling blog must stay reachable", lists.match("y.blogspot.com"));
+        assertNull("the platform itself must stay reachable", lists.match("blogspot.com"));
+    }
+
+    @Test
+    public void twoBlogsOnTheSamePlatformAreListedSeparately() throws IOException {
+        DomainLists lists = newListsWithSharedHosting(new File(tmp.getRoot(), "dyn.txt"));
+        lists.load(asset(""));
+        assertEquals(DomainLists.AddResult.ADDED, lists.addDetected("x.blogspot.com"));
+        assertEquals(DomainLists.AddResult.ADDED, lists.addDetected("y.blogspot.com"));
+        assertEquals(
+                new HashSet<>(Arrays.asList("x.blogspot.com", "y.blogspot.com")),
+                lists.dynamicSnapshot());
+    }
+
+    @Test
+    public void aDeepSharedHostIsStoredExactlyAsSeen() throws IOException {
+        DomainLists lists = newListsWithSharedHosting(new File(tmp.getRoot(), "dyn.txt"));
+        lists.load(asset(""));
+        lists.addDetected("www.someone.github.io");
+        assertEquals(Collections.singleton("www.someone.github.io"), lists.dynamicSnapshot());
+        assertNull(lists.match("other.github.io"));
+    }
+
+    @Test
+    public void theSharedHostingSuffixItselfIsNeverStored() throws IOException {
+        File f = new File(tmp.getRoot(), "dyn.txt");
+        DomainLists lists = newListsWithSharedHosting(f);
+        lists.load(asset(""));
+        assertEquals(
+                DomainLists.AddResult.REFUSED_NEVER_BLOCK, lists.addDetected("blogspot.com"));
+        assertEquals(DomainLists.AddResult.REFUSED_NEVER_BLOCK, lists.addDetected("github.io"));
+        assertTrue(lists.dynamicSnapshot().isEmpty());
+        assertTrue(lines(f).isEmpty());
+    }
+
+    @Test
+    public void aNormalDomainStillStoresItsRegistrableDomain() throws IOException {
+        DomainLists lists = newListsWithSharedHosting(new File(tmp.getRoot(), "dyn.txt"));
+        lists.load(asset(""));
+        lists.addDetected("www.pornhub.com");
+        assertEquals(Collections.singleton("pornhub.com"), lists.dynamicSnapshot());
+    }
+
+    @Test
+    public void syncKeepsExactSharedHostsAndDropsTheBareSuffix() throws IOException {
+        DomainLists lists = newListsWithSharedHosting(new File(tmp.getRoot(), "dyn.txt"));
+        lists.load(asset(""));
+        lists.replaceDynamic(Arrays.asList("x.blogspot.com", "blogspot.com", "github.io"));
+        assertEquals(Collections.singleton("x.blogspot.com"), lists.dynamicSnapshot());
+        assertNull(lists.match("y.blogspot.com"));
+    }
+
     // ---- syncing from the server ----------------------------------------------------------------
 
     @Test

@@ -100,6 +100,49 @@ public class AdultAssetTest {
     }
 
     @Test
+    public void noEntryIsABareSharedHostingSuffix() throws Exception {
+        NeverBlockList nb = neverBlock();
+        List<String> bad = new ArrayList<>();
+        for (String d : entries()) {
+            if (nb.isSharedSuffix(d)) {
+                bad.add(d);
+            }
+        }
+        assertEquals("a bare shared-hosting suffix would block the whole platform: " + bad,
+                0, bad.size());
+    }
+
+    @Test
+    public void sharedHostingSectionHasTheAgreedSuffixes() throws Exception {
+        NeverBlockList nb = neverBlock();
+        for (String s :
+                new String[] {
+                    "blogspot.com", "tumblr.com", "wordpress.com", "github.io", "netlify.app",
+                    "vercel.app", "pages.dev", "web.app", "firebaseapp.com", "herokuapp.com",
+                    "sites.google.com"
+                }) {
+            assertTrue(s + " must be a shared-hosting suffix", nb.isSharedSuffix(s));
+            assertTrue(nb.isSharedHost("x." + s));
+        }
+        assertEquals(11, nb.exactHostOnlySize());
+    }
+
+    @Test
+    public void staticEntriesUnderSharedHostingAreKeptAsExactHosts() throws Exception {
+        // Exact hosts under a shared platform are legitimate list entries (one bad blog); only
+        // the bare platform suffix is dangerous.
+        boolean any = false;
+        NeverBlockList nb = neverBlock();
+        for (String d : entries()) {
+            if (nb.isSharedHost(d) && !nb.isSharedSuffix(d)) {
+                any = true;
+                break;
+            }
+        }
+        assertTrue("expected some exact blog hosts in the list", any);
+    }
+
+    @Test
     public void neverBlockAssetHasTheAgreedEntries() throws Exception {
         NeverBlockList nb = neverBlock();
         for (String d :
