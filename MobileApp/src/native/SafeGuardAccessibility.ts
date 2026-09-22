@@ -50,8 +50,17 @@ export interface AddDetectedDomainResult {
   host?: string;
 }
 
+/** Outcome of asking native to send Chrome back one page for an OCR-only adult detection (F2). */
+export interface LeaveBlockedPageResult {
+  left: boolean;
+  reason: string;
+  host?: string;
+}
+
 interface SafeGuardAccessibilityNativeModule {
   addDetectedDomain(captureTimestampMs: number): Promise<AddDetectedDomainResult>;
+  leaveBlockedPage(captureTimestampMs: number): Promise<LeaveBlockedPageResult>;
+  devAddDetectedDomainNow(): Promise<AddDetectedDomainResult>;
   showBrowserBlockScreen(): Promise<boolean>;
   isEnabled(): Promise<boolean>;
   openAccessibilitySettings(): Promise<boolean>;
@@ -127,6 +136,47 @@ export async function addDetectedDomain(
     return await mod.addDetectedDomain(captureTimestampMs);
   } catch {
     return {added: false, listed: false, reason: 'native_error'};
+  }
+}
+
+/**
+ * DEBUG BUILDS ONLY (Q2 device arm, review round 4). Calls native `addDetectedDomain` with the
+ * capture timestamp genuinely `now`, so attribution runs against the real history ring without a
+ * staged screenshot/vision pipeline run. Gated exactly like the static-list switch: the native
+ * side refuses outside a debug build (`BuildConfig.DEBUG`), and this wrapper is a no-op outside
+ * `__DEV__` too, so it is inert on both sides regardless of which check a caller might skip.
+ */
+export async function devAddDetectedDomainNow(): Promise<AddDetectedDomainResult> {
+  if (!__DEV__) {
+    return {added: false, listed: false, reason: 'not_dev_build'};
+  }
+  const mod = getSafeGuardAccessibilityModule();
+  if (!mod) {
+    return {added: false, listed: false, reason: 'module_unavailable'};
+  }
+  try {
+    return await mod.devAddDetectedDomainNow();
+  } catch {
+    return {added: false, listed: false, reason: 'native_error'};
+  }
+}
+
+/**
+ * F2. An OCR-only adult detection in Chrome: native resolves the Chrome host at
+ * `captureTimestampMs` the same way `addDetectedDomain` does, and runs the Back-only sequence.
+ * Never lists anything, never files an incident. Never rejects: any failure is a refusal.
+ */
+export async function leaveBlockedPage(
+  captureTimestampMs: number,
+): Promise<LeaveBlockedPageResult> {
+  const mod = getSafeGuardAccessibilityModule();
+  if (!mod) {
+    return {left: false, reason: 'module_unavailable'};
+  }
+  try {
+    return await mod.leaveBlockedPage(captureTimestampMs);
+  } catch {
+    return {left: false, reason: 'native_error'};
   }
 }
 

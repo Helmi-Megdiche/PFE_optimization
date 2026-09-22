@@ -1,5 +1,8 @@
 import {withTimeout} from './withTimeout';
-import type {AddDetectedDomainResult} from '../native/SafeGuardAccessibility';
+import type {
+  AddDetectedDomainResult,
+  LeaveBlockedPageResult,
+} from '../native/SafeGuardAccessibility';
 
 /**
  * Phase B: pure decisions for "did this capture show an adult site in Chrome, and what do we do".
@@ -69,6 +72,26 @@ export function resolveCaptureTimestampMs(event: {
   return null;
 }
 
+/**
+ * F2 (review round 4, 2026-09-22 device finding): a real device loop — an OCR-only adult detection
+ * ("porn" read off the page text, raw image score well under 0.7) presents a mission but never
+ * presses Back, so once the mission ends the child is still on the adult page and the very next
+ * capture starts another mission. Blacklisting stays strict (needs the image check, R4); leaving
+ * the page does not — Back is reversible (worst case, one page back), a wrong blacklist entry is
+ * not. So ANY adult detection in Chrome, including a word-only one, sends the child back; only a
+ * raw-score-confirmed one (`shouldAddDetectedDomain`) also blacklists. Deliberately broader than
+ * `shouldAddDetectedDomain`: no `adultScore` check at all.
+ */
+export function shouldLeaveBlockedPage(input: {
+  finalCategory: string;
+  appPackage: string | null | undefined;
+}): boolean {
+  return (
+    input.finalCategory === 'adult' &&
+    (input.appPackage === CHROME_PACKAGE || input.appPackage === UNKNOWN_PACKAGE)
+  );
+}
+
 export type BrowserAddOutcome =
   | {qualifies: false}
   | {qualifies: true; skipped: 'no_capture_ts' | 'timeout'; result: null}
@@ -98,6 +121,45 @@ export async function addDetectedDomainForFrame(
   }
   const result = await withTimeout<AddDetectedDomainResult | null>(
     deps.addDetectedDomain(ts),
+    ADD_DETECTED_TIMEOUT_MS,
+    null,
+  );
+  if (result == null) {
+    return {qualifies: true, skipped: 'timeout', result: null};
+  }
+  return {qualifies: true, result};
+}
+
+export type LeaveBlockedPageOutcome =
+  | {qualifies: false}
+  | {qualifies: true; skipped: 'no_capture_ts' | 'timeout'; result: null}
+  | {qualifies: true; skipped?: undefined; result: LeaveBlockedPageResult};
+
+/**
+ * F2. Runs `shouldLeaveBlockedPage` and, if it holds, asks native to send Chrome back one page.
+ * Called only when {@link addDetectedDomainForFrame} did NOT qualify for this same frame — when it
+ * did, its own Back-only sequence already covers it, and `shouldAddDetectedDomain`'s conditions are
+ * a strict subset of this function's, so running both would start two sequences for nothing.
+ */
+export async function leaveBlockedPageForFrame(
+  input: {
+    finalCategory: string;
+    appPackage: string | null | undefined;
+    event: {timestamp?: number | null; filePath?: string | null};
+  },
+  deps: {
+    leaveBlockedPage: (captureTimestampMs: number) => Promise<LeaveBlockedPageResult>;
+  },
+): Promise<LeaveBlockedPageOutcome> {
+  if (!shouldLeaveBlockedPage(input)) {
+    return {qualifies: false};
+  }
+  const ts = resolveCaptureTimestampMs(input.event);
+  if (ts == null) {
+    return {qualifies: true, skipped: 'no_capture_ts', result: null};
+  }
+  const result = await withTimeout<LeaveBlockedPageResult | null>(
+    deps.leaveBlockedPage(ts),
     ADD_DETECTED_TIMEOUT_MS,
     null,
   );

@@ -114,6 +114,28 @@ public final class BrowserBlockController {
         }
     }
 
+    public static final class LeaveOutcome {
+        /** An enforcement sequence was started (or one was already running) for this host. */
+        public final boolean left;
+
+        public final String reason;
+        /** The host as it was on screen (host only). Null when refused before a host was known. */
+        public final String host;
+
+        public final Decision decision;
+
+        LeaveOutcome(boolean left, String reason, String host, Decision decision) {
+            this.left = left;
+            this.reason = reason;
+            this.host = host;
+            this.decision = decision;
+        }
+
+        static LeaveOutcome refused(String reason) {
+            return new LeaveOutcome(false, reason, null, Decision.NONE);
+        }
+    }
+
     private final DomainLists lists;
     private final HostHistory history;
     private final OverlayKindSource overlay;
@@ -268,6 +290,51 @@ public final class BrowserBlockController {
                             nowUptimeMs);
         }
         return new AddOutcome(added, true, added ? "added" : "duplicate", host, decision);
+    }
+
+    /**
+     * F2 (review round 4, 2026-09-22 device finding): JS reports an OCR-only adult detection in
+     * Chrome — the image check did not clear the blacklist threshold, so nothing may be listed and
+     * no incident may be filed, but the child should not be left sitting on the page either. The host
+     * is resolved HERE using the identical A2/A4 attribution rules as {@link #addDetectedDomain}
+     * (same {@link #MAX_CAPTURE_AGE_MS}, same no-host-change requirement) — Back is reversible,
+     * blacklisting is not, so this path never touches {@link #lists}.
+     */
+    public synchronized LeaveOutcome leaveBlockedPage(
+            long captureTsWallMs, long nowWallMs, long nowUptimeMs) {
+        if (captureTsWallMs <= 0) {
+            return LeaveOutcome.refused("no_capture_ts");
+        }
+        long age = Math.max(0L, nowWallMs - captureTsWallMs);
+        if (age > MAX_CAPTURE_AGE_MS) {
+            return LeaveOutcome.refused("capture_too_old");
+        }
+        long captureUptime = nowUptimeMs - age;
+
+        HostHistory.Entry cover = history.entryCoveringAt(captureUptime);
+        if (cover == null) {
+            return LeaveOutcome.refused("no_host");
+        }
+        if (cover.host == null) {
+            return LeaveOutcome.refused("left_chrome");
+        }
+        if (history.anyEntryAfter(captureUptime, nowUptimeMs)) {
+            return LeaveOutcome.refused("host_changed_since_capture");
+        }
+
+        String host = cover.host;
+        lastCheckedHost = host;
+
+        if (sequenceActive(nowUptimeMs)) {
+            // A5: one sequence at a time — an enforcement is already under way for this page
+            // (e.g. addDetectedDomain's own Back-only sequence just started for the same host).
+            return new LeaveOutcome(true, "already_in_progress", host, Decision.NONE);
+        }
+        sequenceStep = 1;
+        sequenceStartMs = nowUptimeMs;
+        // No domain, no source, no incident: this is not a blacklist match.
+        Decision decision = new Decision(Enforcement.BACK_ONLY, null, null, false);
+        return new LeaveOutcome(true, "left", host, decision);
     }
 
     // ---- internals -----------------------------------------------------------------------------

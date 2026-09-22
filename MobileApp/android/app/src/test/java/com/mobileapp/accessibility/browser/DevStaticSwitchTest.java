@@ -48,6 +48,28 @@ public class DevStaticSwitchTest {
     }
 
     @Test
+    public void devAddDetectedDomainNowIsGatedExactlyLikeTheStaticListSwitch() throws Exception {
+        // Q2 device arm (review round 4): a dev-only bridge trigger with the same release
+        // guarantee as the static-list switch above — BuildConfig.DEBUG is a compile-time
+        // constant, false in release, so a release build can never reach the branch that calls
+        // addDetectedDomain(now). Text-scanned (not classloaded) because the module class pulls
+        // in the RN bridge/Android classpath this test module doesn't have.
+        File src =
+                new File(
+                        "src/main/java/com/mobileapp/accessibility/SafeGuardAccessibilityModule.java");
+        String text =
+                new String(java.nio.file.Files.readAllBytes(src.toPath()), StandardCharsets.UTF_8);
+        assertTrue(text.contains("public void devAddDetectedDomainNow("));
+        assertTrue(
+                "release builds must be gated by the compile-time constant",
+                text.contains("if (!BuildConfig.DEBUG) {"));
+        assertEquals(
+                "exactly one dev-only trigger method",
+                1,
+                text.split("public void devAddDetectedDomainNow\\(", -1).length - 1);
+    }
+
+    @Test
     public void domainListsIgnoresTheStaticListWhileSwitchedOffButKeepsDetectedDomains()
             throws Exception {
         Executor direct = Runnable::run;

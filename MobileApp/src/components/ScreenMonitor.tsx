@@ -8,7 +8,10 @@ import {
   View,
 } from 'react-native';
 import { useScreenshotCapture } from '../hooks/useScreenshotCapture';
-import { openAccessibilitySettings } from '../native/SafeGuardAccessibility';
+import {
+  devAddDetectedDomainNow,
+  openAccessibilitySettings,
+} from '../native/SafeGuardAccessibility';
 import getScreenCaptureModule from '../native/ScreenCapture';
 import { scLog, scWarn } from '../utils/screenCaptureLogger';
 import { getMonitoringIntent, setMonitoringIntent } from '../utils/monitoringIntent';
@@ -359,6 +362,21 @@ export function ScreenMonitor({
           <AppText variant="bodyStrong" style={{ color: '#9B2D18' }}>
             {lastError}
           </AppText>
+        </Card>
+      ) : null}
+
+      {__DEV__ ? (
+        <Card>
+          <SectionLabel>Dev · Phase B Q2 trigger</SectionLabel>
+          <Button
+            label="devAddDetectedDomainNow"
+            variant="secondary"
+            onPress={() => {
+              void devAddDetectedDomainNow().then((r) =>
+                scLog('devAddDetectedDomainNow', {...r}),
+              );
+            }}
+          />
         </Card>
       ) : null}
     </View>

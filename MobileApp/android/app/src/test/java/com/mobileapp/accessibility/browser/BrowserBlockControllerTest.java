@@ -9,6 +9,7 @@ import static org.junit.Assert.assertTrue;
 import com.mobileapp.accessibility.browser.BrowserBlockController.AddOutcome;
 import com.mobileapp.accessibility.browser.BrowserBlockController.Decision;
 import com.mobileapp.accessibility.browser.BrowserBlockController.Enforcement;
+import com.mobileapp.accessibility.browser.BrowserBlockController.LeaveOutcome;
 import com.mobileapp.accessibility.browser.BrowserBlockController.OverlayKind;
 import com.mobileapp.accessibility.browser.BrowserBlockController.SequenceStep;
 import java.io.ByteArrayInputStream;
@@ -338,6 +339,135 @@ public class BrowserBlockControllerTest {
         assertTrue(o.listed);
         assertEquals(Enforcement.NONE, o.decision.enforcement);
         assertFalse(o.decision.emitIncident);
+    }
+
+    @Test
+    public void listsBecomingReadyWhileTheCurrentHostIsBlockedStartsExactlyOneSequence()
+            throws Exception {
+        // F1 (review round 4): the child restarted SafeGuard while Chrome was already on a
+        // blocked page. Before the static list finishes loading, the host isn't recognised yet.
+        DomainLists notYetLoaded =
+                new DomainLists(
+                        new NeverBlockList(Arrays.asList("google.*")),
+                        new File(tmp.getRoot(), "f1.txt"),
+                        Runnable::run,
+                        m -> {});
+        HostHistory h = new HostHistory();
+        BrowserBlockController cc = new BrowserBlockController(notYetLoaded, h, () -> overlay);
+        h.recordHost("blocked.com", 1000);
+        assertEquals(Enforcement.NONE, cc.onUrlRead("blocked.com", 1050, true).enforcement);
+
+        // The list finishes loading while Chrome is still on the same page (the runtime's F1
+        // re-check, modelled here as a forced re-read — the same call a Chrome window-state
+        // change makes).
+        notYetLoaded.load(asset("blocked.com\n"));
+        Decision first = cc.onUrlRead("blocked.com", 1100, true);
+        assertEquals(Enforcement.BACK_AND_BLOCK_SCREEN, first.enforcement);
+        assertTrue(first.emitIncident);
+        assertTrue(cc.sequenceActive(1100));
+
+        // A second forced re-check landing inside the same sequence (an ordinary window event
+        // racing the F1 check) must not start a second sequence or emit a second incident.
+        Decision second = cc.onUrlRead("blocked.com", 1150, true);
+        assertEquals(Enforcement.NONE, second.enforcement);
+        assertFalse(second.emitIncident);
+    }
+
+    // ---- leaveBlockedPage path (F2) -----------------------------------------------------------
+
+    private LeaveOutcome leaveAt(long captureAgeMs) {
+        return c.leaveBlockedPage(NOW_WALL - captureAgeMs, NOW_WALL, NOW_UPTIME);
+    }
+
+    @Test
+    public void leaveNeverFallsBackToNow() {
+        history.recordHost("fresh.com", 40_000);
+        for (long ts : new long[] {0L, -5L}) {
+            LeaveOutcome o = c.leaveBlockedPage(ts, NOW_WALL, NOW_UPTIME);
+            assertFalse(o.left);
+            assertEquals("no_capture_ts", o.reason);
+        }
+    }
+
+    @Test
+    public void leaveRefusesACaptureOlderThanTheMaxAge() {
+        history.recordHost("fresh.com", 1_000);
+        assertEquals("capture_too_old", leaveAt(30_001).reason);
+    }
+
+    @Test
+    public void leaveRefusesWhenNoHostIsKnown() {
+        LeaveOutcome o = leaveAt(2000);
+        assertFalse(o.left);
+        assertEquals("no_host", o.reason);
+    }
+
+    @Test
+    public void leaveRefusesWhenTheCaptureWasNotOnChrome() {
+        // Chrome was on a page, then the child switched to Instagram before the capture instant;
+        // the frame that scored an OCR-only adult text hit must not be blamed on the last Chrome
+        // host it happens to share history with.
+        history.recordHost("some-site.com", 40_000);
+        c.onForegroundPackage("com.instagram.android", 45_000);
+        LeaveOutcome o = leaveAt(2000); // capture instant = 48_000, inside the Instagram period
+        assertFalse(o.left);
+        assertEquals("left_chrome", o.reason);
+    }
+
+    @Test
+    public void leaveRefusesOnAHostChangeSinceTheCapture() {
+        history.recordHost("first.com", 40_000);
+        history.recordHost("second.com", 49_000); // after the capture at 48_000
+        LeaveOutcome o = leaveAt(2000);
+        assertFalse(o.left);
+        assertEquals("host_changed_since_capture", o.reason);
+    }
+
+    @Test
+    public void aValidLeaveStartsBackOnlyWithNoListWriteAndNoIncident() {
+        history.recordHost("wordpage.com", 40_000);
+        overlay = OverlayKind.NONE;
+        LeaveOutcome o = leaveAt(2000);
+
+        assertTrue(o.left);
+        assertEquals("left", o.reason);
+        assertEquals("wordpage.com", o.host);
+        assertEquals(Enforcement.BACK_ONLY, o.decision.enforcement);
+        assertFalse("no incident for a word-only detection", o.decision.emitIncident);
+        assertNull("no domain — this is not a blacklist match", o.decision.incidentDomain);
+        assertTrue(lists.dynamicSnapshot().isEmpty());
+        assertNull("never touches the list", lists.match("wordpage.com"));
+        assertTrue(c.sequenceActive(NOW_UPTIME));
+    }
+
+    @Test
+    public void leaveSharesTheA5ReEntrancyGuardWithARunningWatcherSequence() {
+        // The URL watcher already started a BACK_AND_BLOCK_SCREEN sequence for a listed host;
+        // a leaveBlockedPage call landing inside it (e.g. the same OCR-only frame that also fed a
+        // stale word match) must not start a second sequence.
+        history.recordHost("blocked.com", 40_000);
+        c.onUrlRead("blocked.com", NOW_UPTIME - 100, false);
+        assertTrue(c.sequenceActive(NOW_UPTIME));
+
+        LeaveOutcome o = leaveAt(500); // capture instant 49_500: Chrome was on blocked.com
+        assertTrue(o.left);
+        assertEquals("already_in_progress", o.reason);
+        assertEquals(Enforcement.NONE, o.decision.enforcement);
+        assertFalse(o.decision.emitIncident);
+    }
+
+    @Test
+    public void aLeaveDuringARunningSequenceDoesNotExtendOrResetIt() {
+        history.recordHost("blocked.com", 40_000);
+        Decision first = c.onUrlRead("blocked.com", NOW_UPTIME - 100, false);
+        long originalStart = NOW_UPTIME - 100;
+        assertEquals(Enforcement.BACK_AND_BLOCK_SCREEN, first.enforcement);
+
+        leaveAt(500); // absorbed by the A5 guard, must not restart the sequence clock
+        long justBeforeOriginalCeiling = originalStart + BrowserBlockController.SEQUENCE_CEILING_MS - 1;
+        assertTrue(c.sequenceActive(justBeforeOriginalCeiling));
+        long atOriginalCeiling = originalStart + BrowserBlockController.SEQUENCE_CEILING_MS;
+        assertFalse(c.sequenceActive(atOriginalCeiling));
     }
 
     @Test

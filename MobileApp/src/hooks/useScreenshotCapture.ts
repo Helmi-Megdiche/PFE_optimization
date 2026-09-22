@@ -19,11 +19,13 @@ import {presentMissionFromCapture} from '../missions/presentMissionFromCapture';
 import {withTimeout} from '../utils/withTimeout';
 import {
   addDetectedDomainForFrame,
+  leaveBlockedPageForFrame,
   shouldShowBlockScreen,
   shouldShowBrowserWarning,
 } from '../utils/browserBlockDecision';
 import {
   addDetectedDomain,
+  leaveBlockedPage,
   showBrowserBlockScreen,
 } from '../native/SafeGuardAccessibility';
 import {
@@ -1082,6 +1084,28 @@ export function useScreenshotCapture(
                 reason: browserAdd.result.reason,
                 host: browserAdd.result.host,
               });
+            }
+          } else {
+            // F2: the image check did not clear the blacklist threshold (or the category/package
+            // gate failed outright) — still send the child back on ANY adult detection in Chrome,
+            // including an OCR-only one, so a false positive never leaves the child parked on the
+            // page. When addDetectedDomain DID qualify above, its own Back-only sequence already
+            // covers it — shouldAddDetectedDomain's conditions are a strict subset of
+            // shouldLeaveBlockedPage's, so this branch only runs when that one didn't fire.
+            const browserLeave = await leaveBlockedPageForFrame(
+              {finalCategory, appPackage: attributionPackage, event},
+              {leaveBlockedPage},
+            );
+            if (browserLeave.qualifies) {
+              if (browserLeave.skipped) {
+                scWarn('browser.leave skipped', {reason: browserLeave.skipped});
+              } else {
+                scLog('browser.leave', {
+                  left: browserLeave.result.left,
+                  reason: browserLeave.result.reason,
+                  host: browserLeave.result.host,
+                });
+              }
             }
           }
           browserAdult = shouldShowBrowserWarning({

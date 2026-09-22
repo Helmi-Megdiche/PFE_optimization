@@ -14,7 +14,9 @@ import com.facebook.react.bridge.ReactContextBaseJavaModule;
 import com.facebook.react.bridge.ReactMethod;
 import com.facebook.react.bridge.Arguments;
 import com.facebook.react.bridge.WritableMap;
+import com.mobileapp.BuildConfig;
 import com.mobileapp.accessibility.browser.BrowserBlockController.AddOutcome;
+import com.mobileapp.accessibility.browser.BrowserBlockController.LeaveOutcome;
 import com.mobileapp.accessibility.browser.BrowserBlockRuntime;
 import com.facebook.react.module.annotations.ReactModule;
 
@@ -122,6 +124,73 @@ public class SafeGuardAccessibilityModule extends ReactContextBaseJavaModule {
             promise.resolve(out);
         } catch (Throwable t) {
             promise.reject("E_ADD_DETECTED", "addDetectedDomain failed", t);
+        }
+    }
+
+    /**
+     * F2 (review round 4). An OCR-only adult detection in Chrome — the image check did not clear
+     * the blacklist threshold, so nothing is added or reported, but Back still runs so the child
+     * isn't left sitting on the page. Resolves {left, reason, host}. Never rejects for a refusal.
+     */
+    @ReactMethod
+    public void leaveBlockedPage(double captureTimestampMs, Promise promise) {
+        try {
+            SafeGuardAccessibilityService svc = SafeGuardAccessibilityService.instance;
+            BrowserBlockRuntime b = svc == null ? null : svc.getBrowserBlocker();
+            WritableMap out = Arguments.createMap();
+            if (b == null) {
+                out.putBoolean("left", false);
+                out.putString("reason", "service_unavailable");
+                promise.resolve(out);
+                return;
+            }
+            LeaveOutcome o = b.leaveBlockedPage((long) captureTimestampMs);
+            out.putBoolean("left", o.left);
+            out.putString("reason", o.reason);
+            if (o.host != null) {
+                out.putString("host", o.host);
+            }
+            promise.resolve(out);
+        } catch (Throwable t) {
+            promise.reject("E_LEAVE_BLOCKED", "leaveBlockedPage failed", t);
+        }
+    }
+
+    /**
+     * DEBUG BUILDS ONLY (Q2 device arm, review round 4): calls {@code addDetectedDomain} with the
+     * capture timestamp genuinely {@code now}, so native attribution runs against the real history
+     * ring without needing a staged screenshot/vision pipeline run — the same "gated exactly like
+     * the static-list switch" shape as {@link com.mobileapp.accessibility.browser.DevStaticSwitch}:
+     * the guard is {@code BuildConfig.DEBUG}, a compile-time constant that is {@code false} in
+     * release, so this branch never runs there. No marker file needed (nothing to leave behind).
+     */
+    @ReactMethod
+    public void devAddDetectedDomainNow(Promise promise) {
+        if (!BuildConfig.DEBUG) {
+            promise.reject("E_DEV_ONLY", "devAddDetectedDomainNow is debug-build only");
+            return;
+        }
+        try {
+            SafeGuardAccessibilityService svc = SafeGuardAccessibilityService.instance;
+            BrowserBlockRuntime b = svc == null ? null : svc.getBrowserBlocker();
+            WritableMap out = Arguments.createMap();
+            if (b == null) {
+                out.putBoolean("added", false);
+                out.putBoolean("listed", false);
+                out.putString("reason", "service_unavailable");
+                promise.resolve(out);
+                return;
+            }
+            AddOutcome o = b.addDetectedDomain(System.currentTimeMillis());
+            out.putBoolean("added", o.added);
+            out.putBoolean("listed", o.listed);
+            out.putString("reason", o.reason);
+            if (o.host != null) {
+                out.putString("host", o.host);
+            }
+            promise.resolve(out);
+        } catch (Throwable t) {
+            promise.reject("E_DEV_ADD_NOW", "devAddDetectedDomainNow failed", t);
         }
     }
 

@@ -1,7 +1,9 @@
 import {
   addDetectedDomainForFrame,
+  leaveBlockedPageForFrame,
   resolveCaptureTimestampMs,
   shouldAddDetectedDomain,
+  shouldLeaveBlockedPage,
   shouldShowBlockScreen,
   shouldShowBrowserWarning,
 } from '../src/utils/browserBlockDecision';
@@ -46,6 +48,129 @@ describe('shouldAddDetectedDomain (R4)', () => {
   it('rejects a missing adultScore', () => {
     expect(shouldAddDetectedDomain({...chromeAdult, adultScore: undefined})).toBe(false);
     expect(shouldAddDetectedDomain({...chromeAdult, adultScore: null})).toBe(false);
+  });
+});
+
+describe('shouldLeaveBlockedPage (F2)', () => {
+  it('sends the child back on a vision-confirmed adult frame too (superset of shouldAddDetectedDomain)', () => {
+    expect(
+      shouldLeaveBlockedPage({finalCategory: 'adult', appPackage: 'com.android.chrome'}),
+    ).toBe(true);
+  });
+  it('sends the child back on an OCR-only adult frame (no adultScore involved at all)', () => {
+    expect(
+      shouldLeaveBlockedPage({finalCategory: 'adult', appPackage: 'com.android.chrome'}),
+    ).toBe(true);
+  });
+  it('never triggers for violent or any other non-adult category', () => {
+    expect(
+      shouldLeaveBlockedPage({finalCategory: 'violent', appPackage: 'com.android.chrome'}),
+    ).toBe(false);
+    expect(
+      shouldLeaveBlockedPage({finalCategory: 'neutral', appPackage: 'com.android.chrome'}),
+    ).toBe(false);
+    expect(
+      shouldLeaveBlockedPage({finalCategory: 'suggestive', appPackage: 'com.android.chrome'}),
+    ).toBe(false);
+  });
+  it('rejects any package other than Chrome', () => {
+    expect(
+      shouldLeaveBlockedPage({finalCategory: 'adult', appPackage: 'com.instagram.android'}),
+    ).toBe(false);
+    expect(shouldLeaveBlockedPage({finalCategory: 'adult', appPackage: null})).toBe(false);
+  });
+  it('lets an unknown package through, same as the add path', () => {
+    expect(shouldLeaveBlockedPage({finalCategory: 'adult', appPackage: 'unknown'})).toBe(true);
+  });
+});
+
+describe('leaveBlockedPageForFrame', () => {
+  const base = {
+    finalCategory: 'adult',
+    appPackage: 'com.android.chrome',
+    event: {timestamp: 1789411321800, filePath: '/x/screen_1.jpg'},
+  };
+  const ok = {left: true, reason: 'left', host: 'x.com'};
+
+  it('does not call native for a non-adult category', async () => {
+    const leave = jest.fn();
+    const out = await leaveBlockedPageForFrame(
+      {...base, finalCategory: 'violent'},
+      {leaveBlockedPage: leave},
+    );
+    expect(out).toEqual({qualifies: false});
+    expect(leave).not.toHaveBeenCalled();
+  });
+  it('passes the capture time to native and returns the result', async () => {
+    const leave = jest.fn().mockResolvedValue(ok);
+    const out = await leaveBlockedPageForFrame(base, {leaveBlockedPage: leave});
+    expect(leave).toHaveBeenCalledWith(1789411321800);
+    expect(out).toEqual({qualifies: true, result: ok});
+  });
+  it('skips with no_capture_ts and never calls native', async () => {
+    const leave = jest.fn();
+    const out = await leaveBlockedPageForFrame(
+      {...base, event: {filePath: '/x/frame.jpg'}},
+      {leaveBlockedPage: leave},
+    );
+    expect(out).toEqual({qualifies: true, skipped: 'no_capture_ts', result: null});
+    expect(leave).not.toHaveBeenCalled();
+  });
+  it('gives up after 500 ms so the POST is never held up', async () => {
+    jest.useFakeTimers();
+    try {
+      const leave = jest.fn().mockReturnValue(new Promise(() => {}));
+      const p = leaveBlockedPageForFrame(base, {leaveBlockedPage: leave});
+      await jest.advanceTimersByTimeAsync(500);
+      expect(await p).toEqual({qualifies: true, skipped: 'timeout', result: null});
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+});
+
+describe('F2 sequencing: exactly one of addDetectedDomain / leaveBlockedPage per frame', () => {
+  it('OCR-only adult (adultScore under 0.7): leaveBlockedPage runs, addDetectedDomain does not qualify', async () => {
+    const ocrOnly = {finalCategory: 'adult', adultScore: 0.06, appPackage: 'com.android.chrome'};
+    const event = {timestamp: 1789411321800, filePath: '/x/screen_1.jpg'};
+    const add = jest.fn();
+    const leave = jest.fn().mockResolvedValue({left: true, reason: 'left', host: 'x.com'});
+
+    const addOutcome = await addDetectedDomainForFrame({...ocrOnly, event}, {addDetectedDomain: add});
+    expect(addOutcome).toEqual({qualifies: false});
+    expect(add).not.toHaveBeenCalled();
+
+    // The caller only calls leave when add did not qualify (useScreenshotCapture.ts's branch).
+    const leaveOutcome = await leaveBlockedPageForFrame({...ocrOnly, event}, {leaveBlockedPage: leave});
+    expect(leaveOutcome.qualifies).toBe(true);
+    expect(leave).toHaveBeenCalledTimes(1);
+  });
+
+  it('a vision-confirmed adult frame (adultScore >= 0.7): addDetectedDomain qualifies, so leave is never asked to run', async () => {
+    const confirmed = {finalCategory: 'adult', adultScore: 0.9, appPackage: 'com.android.chrome'};
+    const event = {timestamp: 1789411321800, filePath: '/x/screen_1.jpg'};
+    const add = jest.fn().mockResolvedValue({added: true, listed: true, reason: 'added', host: 'x.com'});
+
+    const addOutcome = await addDetectedDomainForFrame({...confirmed, event}, {addDetectedDomain: add});
+    expect(addOutcome.qualifies).toBe(true);
+    expect(add).toHaveBeenCalledTimes(1);
+    // addOutcome.qualifies === true is exactly the condition useScreenshotCapture.ts uses to SKIP
+    // calling leaveBlockedPageForFrame at all — shouldAddDetectedDomain's conditions are a strict
+    // subset of shouldLeaveBlockedPage's, so this is the only guard needed to avoid two sequences.
+  });
+
+  it('violent category: neither addDetectedDomain nor leaveBlockedPage qualify', async () => {
+    const violent = {finalCategory: 'violent', adultScore: 0.9, appPackage: 'com.android.chrome'};
+    const event = {timestamp: 1789411321800, filePath: '/x/screen_1.jpg'};
+    const add = jest.fn();
+    const leave = jest.fn();
+
+    const addOutcome = await addDetectedDomainForFrame({...violent, event}, {addDetectedDomain: add});
+    const leaveOutcome = await leaveBlockedPageForFrame({...violent, event}, {leaveBlockedPage: leave});
+    expect(addOutcome).toEqual({qualifies: false});
+    expect(leaveOutcome).toEqual({qualifies: false});
+    expect(add).not.toHaveBeenCalled();
+    expect(leave).not.toHaveBeenCalled();
   });
 });
 

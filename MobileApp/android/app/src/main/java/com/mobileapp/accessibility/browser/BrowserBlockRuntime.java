@@ -13,6 +13,7 @@ import com.mobileapp.BuildConfig;
 import com.mobileapp.accessibility.browser.BrowserBlockController.AddOutcome;
 import com.mobileapp.accessibility.browser.BrowserBlockController.Decision;
 import com.mobileapp.accessibility.browser.BrowserBlockController.Enforcement;
+import com.mobileapp.accessibility.browser.BrowserBlockController.LeaveOutcome;
 import com.mobileapp.accessibility.browser.BrowserBlockController.OverlayKind;
 import com.mobileapp.accessibility.browser.BrowserBlockController.SequenceStep;
 import com.mobileapp.accessibility.AccessibilityEventBridge;
@@ -143,6 +144,7 @@ public final class BrowserBlockRuntime {
                                                 + lists.dynamicSnapshot().size()
                                                 + " loadMs="
                                                 + (SystemClock.elapsedRealtime() - startMs));
+                                main.post(this::checkCurrentChromePage);
                             } catch (Throwable e) {
                                 Log.w(TAG, "list load failed — nothing will be blocked", e);
                             }
@@ -150,6 +152,54 @@ public final class BrowserBlockRuntime {
                         "SafeGuardBrowser-load");
         t.setDaemon(true);
         t.start();
+        // Defensive: if the lists were somehow already loaded when this runtime was built (not
+        // reachable today — a fresh DomainLists starts unloaded every time — but kept so a future
+        // change that reuses lists across restarts doesn't silently lose this check).
+        if (lists.isLoaded()) {
+            main.post(this::checkCurrentChromePage);
+        }
+    }
+
+    /**
+     * F1 (review round 4, device finding): a child who restarts SafeGuard, or opens it for the
+     * first time, while Chrome already sits on a blocked page must not get a free pass until the
+     * page's content next changes. Runs once the static list is ready (from {@link #startLoading}),
+     * main thread only. Reads no node beyond the active window's package name unless that window is
+     * Chrome, in which case it makes the one normal url_bar read every Chrome window-state change
+     * already makes.
+     */
+    private void checkCurrentChromePage() {
+        if (shutDown || !isChromeTheActiveWindow()) {
+            return;
+        }
+        Decision d =
+                watcher.onWindowStateChanged(
+                        BrowserBlockController.CHROME_PACKAGE, reader, SystemClock.uptimeMillis());
+        execute(d, SystemClock.uptimeMillis());
+    }
+
+    /** True iff the currently active window's package is Chrome. */
+    private boolean isChromeTheActiveWindow() {
+        List<AccessibilityWindowInfo> windows = service.getWindows();
+        if (windows == null) {
+            return false;
+        }
+        for (AccessibilityWindowInfo w : windows) {
+            if (w == null || !w.isActive()) {
+                continue;
+            }
+            AccessibilityNodeInfo root = w.getRoot();
+            if (root == null) {
+                return false;
+            }
+            try {
+                CharSequence pkg = root.getPackageName();
+                return pkg != null && BrowserBlockController.CHROME_PACKAGE.contentEquals(pkg);
+            } finally {
+                root.recycle();
+            }
+        }
+        return false;
     }
 
     public void shutdown() {
@@ -251,6 +301,29 @@ public final class BrowserBlockRuntime {
                         + o.listed
                         + " added="
                         + o.added
+                        + " reason="
+                        + o.reason
+                        + (o.host != null ? " host=" + o.host : ""));
+        final Decision d = o.decision;
+        if (d.enforcement != Enforcement.NONE) {
+            final long queuedAt = SystemClock.uptimeMillis();
+            main.post(() -> execute(d, queuedAt));
+        }
+        return o;
+    }
+
+    /**
+     * F2: an OCR-only adult detection in Chrome — send the child back one page, no list write, no
+     * incident. Never throws.
+     */
+    public LeaveOutcome leaveBlockedPage(long captureTsWallMs) {
+        LeaveOutcome o =
+                controller.leaveBlockedPage(
+                        captureTsWallMs, System.currentTimeMillis(), SystemClock.uptimeMillis());
+        Log.i(
+                TAG,
+                "browser.leave left="
+                        + o.left
                         + " reason="
                         + o.reason
                         + (o.host != null ? " host=" + o.host : ""));
