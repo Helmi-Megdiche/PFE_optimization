@@ -173,6 +173,15 @@ const ROUTE_INVENTORY: InvEntry[] = [
   { key: 'PUT /api/child/profile', access: 'child:body' },
   { key: 'GET /api/child/interests/:childId', access: 'child:param' },
   { key: 'PUT /api/child/interests', access: 'child:body' },
+
+  // --- blocked-domains (Phase B Task 10) ---
+  { key: 'POST /api/blocked-domains', access: 'child:token' },
+  { key: 'GET /api/blocked-domains/:childId', access: 'child:param' },
+  { key: 'POST /api/blocked-domains/dev/unblock', access: 'child:body' },
+
+  // --- browser-incidents (Phase B Task 10) ---
+  { key: 'POST /api/browser-incidents', access: 'child:token' },
+  { key: 'GET /api/browser-incidents/:childId', access: 'child:param' },
 ];
 
 // Routes whose child id is derived from a loaded row: ownership is checked
