@@ -81,11 +81,14 @@ router.post(
 );
 
 /**
- * GET /api/blocked-domains/:childId — parent dashboard, read-only.
+ * GET /api/blocked-domains/:childId — parent dashboard, read-only. Also reachable by the
+ * child's own device token (Task 11): the device reconciles its dynamic list against this
+ * on sync, so a parent unblock via the dev endpoint reaches the device too. No
+ * requireParentRole here, matching GET /api/badges/child/:childId — requireChildAccess alone
+ * already restricts a child token to its own childId.
  */
 router.get(
   '/:childId',
-  requireParentRole,
   requireChildAccess('param:childId'),
   validateQuery(listBlockedDomainsQuerySchema),
   async (req: AuthenticatedRequest, res: Response) => {

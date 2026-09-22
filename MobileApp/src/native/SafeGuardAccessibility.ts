@@ -1,4 +1,4 @@
-import { NativeModules, Platform } from 'react-native';
+import {NativeModules, Platform} from 'react-native';
 
 /**
  * Bridge to `com.mobileapp.accessibility.SafeGuardAccessibilityModule`.
@@ -58,10 +58,14 @@ export interface LeaveBlockedPageResult {
 }
 
 interface SafeGuardAccessibilityNativeModule {
-  addDetectedDomain(captureTimestampMs: number): Promise<AddDetectedDomainResult>;
+  addDetectedDomain(
+    captureTimestampMs: number,
+  ): Promise<AddDetectedDomainResult>;
   leaveBlockedPage(captureTimestampMs: number): Promise<LeaveBlockedPageResult>;
   devAddDetectedDomainNow(): Promise<AddDetectedDomainResult>;
   showBrowserBlockScreen(): Promise<boolean>;
+  getDynamicDomains(): Promise<string[]>;
+  syncBlockedDomains(domains: string[]): Promise<boolean>;
   isEnabled(): Promise<boolean>;
   openAccessibilitySettings(): Promise<boolean>;
   flushPendingEvents(): Promise<boolean>;
@@ -74,8 +78,9 @@ export function getSafeGuardAccessibilityModule(): SafeGuardAccessibilityNativeM
     return null;
   }
   return (
-    (NativeModules.SafeGuardAccessibility as SafeGuardAccessibilityNativeModule | undefined) ??
-    null
+    (NativeModules.SafeGuardAccessibility as
+      | SafeGuardAccessibilityNativeModule
+      | undefined) ?? null
   );
 }
 
@@ -188,6 +193,35 @@ export async function showBrowserBlockScreen(): Promise<boolean> {
   }
   try {
     return await mod.showBrowserBlockScreen();
+  } catch {
+    return false;
+  }
+}
+
+/** Task 11 (device sync). The dynamic list as it stands right now, for the one-time backfill. */
+export async function getDynamicDomains(): Promise<string[]> {
+  const mod = getSafeGuardAccessibilityModule();
+  if (!mod) {
+    return [];
+  }
+  try {
+    return await mod.getDynamicDomains();
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Task 11 (device sync). Replaces the dynamic list with the server's current active set —
+ * additions and parent removals (via the dev unblock endpoint) both take effect. Never throws.
+ */
+export async function syncBlockedDomains(domains: string[]): Promise<boolean> {
+  const mod = getSafeGuardAccessibilityModule();
+  if (!mod) {
+    return false;
+  }
+  try {
+    return await mod.syncBlockedDomains(domains);
   } catch {
     return false;
   }

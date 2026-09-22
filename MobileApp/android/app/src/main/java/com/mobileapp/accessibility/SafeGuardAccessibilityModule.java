@@ -13,12 +13,17 @@ import com.facebook.react.bridge.ReactApplicationContext;
 import com.facebook.react.bridge.ReactContextBaseJavaModule;
 import com.facebook.react.bridge.ReactMethod;
 import com.facebook.react.bridge.Arguments;
+import com.facebook.react.bridge.ReadableArray;
+import com.facebook.react.bridge.WritableArray;
 import com.facebook.react.bridge.WritableMap;
 import com.mobileapp.BuildConfig;
 import com.mobileapp.accessibility.browser.BrowserBlockController.AddOutcome;
 import com.mobileapp.accessibility.browser.BrowserBlockController.LeaveOutcome;
 import com.mobileapp.accessibility.browser.BrowserBlockRuntime;
 import com.facebook.react.module.annotations.ReactModule;
+
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * Bridge surface for {@link SafeGuardAccessibilityService}: query enable-state, deep-link to
@@ -206,6 +211,55 @@ public class SafeGuardAccessibilityModule extends ReactContextBaseJavaModule {
             promise.resolve(b != null && b.showBlockScreenFromJs());
         } catch (Throwable t) {
             promise.reject("E_SHOW_BLOCK", "showBrowserBlockScreen failed", t);
+        }
+    }
+
+    /**
+     * Task 11 (device sync). The dynamic list as it stands right now, for the one-time backfill
+     * POST — resolves an empty array (never rejects) if the service or its lists aren't up yet.
+     */
+    @ReactMethod
+    public void getDynamicDomains(Promise promise) {
+        try {
+            SafeGuardAccessibilityService svc = SafeGuardAccessibilityService.instance;
+            BrowserBlockRuntime b = svc == null ? null : svc.getBrowserBlocker();
+            WritableArray out = Arguments.createArray();
+            if (b != null) {
+                for (String host : b.getDynamicDomains()) {
+                    out.pushString(host);
+                }
+            }
+            promise.resolve(out);
+        } catch (Throwable t) {
+            promise.reject("E_GET_DYNAMIC_DOMAINS", "getDynamicDomains failed", t);
+        }
+    }
+
+    /**
+     * Task 11 (device sync). Replaces the dynamic list with the server's current active set —
+     * additions and parent removals (via the dev unblock endpoint) both take effect. A no-op if
+     * the service or its lists aren't up yet (nothing to overwrite). Never rejects.
+     */
+    @ReactMethod
+    public void syncBlockedDomains(ReadableArray domains, Promise promise) {
+        try {
+            SafeGuardAccessibilityService svc = SafeGuardAccessibilityService.instance;
+            BrowserBlockRuntime b = svc == null ? null : svc.getBrowserBlocker();
+            if (b == null) {
+                promise.resolve(false);
+                return;
+            }
+            List<String> hosts = new ArrayList<>(domains.size());
+            for (int i = 0; i < domains.size(); i++) {
+                String h = domains.getString(i);
+                if (h != null) {
+                    hosts.add(h);
+                }
+            }
+            b.syncBlockedDomains(hosts);
+            promise.resolve(true);
+        } catch (Throwable t) {
+            promise.reject("E_SYNC_BLOCKED_DOMAINS", "syncBlockedDomains failed", t);
         }
     }
 

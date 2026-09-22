@@ -20,6 +20,7 @@ import {withTimeout} from '../utils/withTimeout';
 import {
   addDetectedDomainForFrame,
   leaveBlockedPageForFrame,
+  resolveCaptureTimestampMs,
   shouldShowBlockScreen,
   shouldShowBrowserWarning,
 } from '../utils/browserBlockDecision';
@@ -27,7 +28,13 @@ import {
   addDetectedDomain,
   leaveBlockedPage,
   showBrowserBlockScreen,
+  type BrowserBlockedEvent,
 } from '../native/SafeGuardAccessibility';
+import {
+  queueBlockedDomainDetection,
+  reportBrowserIncident,
+  runBlockedDomainsSync,
+} from '../services/blockedDomainsSync';
 import {
   applyExplicitOcrBoost,
   applyPostProcessingOverride,
@@ -542,10 +549,21 @@ export function useScreenshotCapture(
     );
   }, []);
 
+  /**
+   * Phase B Task 11: a URL-watcher match (static or dynamic list) ran Back + block screen.
+   * Posted best-effort, not queued on failure — see `reportBrowserIncident`'s own doc comment.
+   * The F2 leave-only path never emits this event (no list write, no incident) — that adult
+   * detection already reaches the parent via the screen event it fires from.
+   */
+  const handleBrowserBlocked = useCallback((event: BrowserBlockedEvent) => {
+    void reportBrowserIncident(event.host, event.listSource, event.timestamp);
+  }, []);
+
   const {connected: a11yConnected} = useAccessibilityEvents({
     onWindowChanged: handleA11yWindowChanged,
     onKeyboardChanged: handleA11yKeyboardChanged,
     onScroll: handleA11yScroll,
+    onBrowserBlocked: handleBrowserBlocked,
   });
 
   useEffect(() => {
@@ -1084,6 +1102,17 @@ export function useScreenshotCapture(
                 reason: browserAdd.result.reason,
                 host: browserAdd.result.host,
               });
+              // Task 11: a genuinely new domain — queue it for the backend right away rather
+              // than waiting for the next full sync. Duplicates/reactivations are NOT re-queued
+              // here; the periodic full sync (runBlockedDomainsSync) is what reconciles those.
+              if (browserAdd.result.added && browserAdd.result.host) {
+                const capturedAtMs =
+                  resolveCaptureTimestampMs(event) ?? Date.now();
+                void queueBlockedDomainDetection(
+                  browserAdd.result.host,
+                  capturedAtMs,
+                );
+              }
             }
           } else {
             // F2: the image check did not clear the blacklist threshold (or the category/package
@@ -1624,6 +1653,10 @@ export function useScreenshotCapture(
       setLastError(null);
       markMonitoringStarted();
       clearStaleNotificationMissionLaunch();
+      // Task 11: fire-and-forget — flush the offline queue, backfill once, reconcile the
+      // device's dynamic list against the server's current active set. Never blocks monitoring
+      // start on network I/O.
+      void runBlockedDomainsSync();
 
       return true;
     } catch (err) {

@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { AppState, DeviceEventEmitter, Platform } from 'react-native';
+import {useEffect, useState} from 'react';
+import {AppState, DeviceEventEmitter, Platform} from 'react-native';
 import {
   ACCESSIBILITY_EVENTS,
   flushPendingAccessibilityEvents,
@@ -7,13 +7,16 @@ import {
   type AccessibilityKeyboardChangedEvent,
   type AccessibilityScrollEvent,
   type AccessibilityWindowChangedEvent,
+  type BrowserBlockedEvent,
 } from '../native/SafeGuardAccessibility';
-import { scLog } from '../utils/screenCaptureLogger';
+import {scLog} from '../utils/screenCaptureLogger';
 
 export interface UseAccessibilityEventsOptions {
   onWindowChanged?: (event: AccessibilityWindowChangedEvent) => void;
   onKeyboardChanged?: (event: AccessibilityKeyboardChangedEvent) => void;
   onScroll?: (event: AccessibilityScrollEvent) => void;
+  /** Phase B Task 11: a URL-watcher match ran Back (+ block screen). Host + list source only. */
+  onBrowserBlocked?: (event: BrowserBlockedEvent) => void;
 }
 
 export interface UseAccessibilityEventsResult {
@@ -36,7 +39,8 @@ export interface UseAccessibilityEventsResult {
 export function useAccessibilityEvents(
   options: UseAccessibilityEventsOptions = {},
 ): UseAccessibilityEventsResult {
-  const { onWindowChanged, onKeyboardChanged, onScroll } = options;
+  const {onWindowChanged, onKeyboardChanged, onScroll, onBrowserBlocked} =
+    options;
   const [connected, setConnected] = useState(false);
 
   useEffect(() => {
@@ -47,7 +51,7 @@ export function useAccessibilityEvents(
       void isAccessibilityServiceEnabled().then(setConnected);
     };
     refresh();
-    const sub = AppState.addEventListener('change', (next) => {
+    const sub = AppState.addEventListener('change', next => {
       if (next === 'active') {
         refresh();
       }
@@ -95,7 +99,18 @@ export function useAccessibilityEvents(
       },
     );
 
-    const appStateSub = AppState.addEventListener('change', (next) => {
+    const browserBlockedSub = DeviceEventEmitter.addListener(
+      ACCESSIBILITY_EVENTS.browserBlocked,
+      (event: BrowserBlockedEvent) => {
+        scLog('[a11y] browser blocked', {
+          host: event.host,
+          listSource: event.listSource,
+        });
+        onBrowserBlocked?.(event);
+      },
+    );
+
+    const appStateSub = AppState.addEventListener('change', next => {
       if (next === 'active') {
         void flushPendingAccessibilityEvents();
       }
@@ -107,11 +122,12 @@ export function useAccessibilityEvents(
       windowSub.remove();
       keyboardSub.remove();
       scrollSub.remove();
+      browserBlockedSub.remove();
       appStateSub.remove();
     };
-  }, [onWindowChanged, onKeyboardChanged, onScroll]);
+  }, [onWindowChanged, onKeyboardChanged, onScroll, onBrowserBlocked]);
 
-  return { connected };
+  return {connected};
 }
 
 export default useAccessibilityEvents;

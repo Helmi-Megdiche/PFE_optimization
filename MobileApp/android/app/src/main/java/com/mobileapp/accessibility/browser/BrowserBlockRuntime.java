@@ -22,7 +22,9 @@ import com.mobileapp.overlay.OverlayService;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.Collection;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -333,6 +335,31 @@ public final class BrowserBlockRuntime {
             main.post(() -> execute(d, queuedAt));
         }
         return o;
+    }
+
+    // ---- device sync (Task 11, called from the RN bridge thread) ------------------------------
+
+    /**
+     * The dynamic list as it stands right now, for the one-time backfill POST. Empty (never null)
+     * if the lists haven't loaded yet — the caller just backfills nothing that round.
+     */
+    public Set<String> getDynamicDomains() {
+        return lists.dynamicSnapshot();
+    }
+
+    /**
+     * Replaces the dynamic list with the server's current active set — additions AND parent
+     * removals both take effect via {@link DomainLists#replaceDynamic}, a full snapshot rewrite.
+     * A no-op (logged) if the lists aren't loaded yet, so a sync racing app start can't overwrite
+     * a real file with an empty one.
+     */
+    public void syncBlockedDomains(Collection<String> domains) {
+        if (!lists.isLoaded()) {
+            Log.w(TAG, "sync skipped — lists not loaded yet");
+            return;
+        }
+        lists.replaceDynamic(domains);
+        Log.i(TAG, "sync applied: dynamic=" + lists.dynamicSnapshot().size());
     }
 
     // ---- enforcement ----------------------------------------------------------------------------
