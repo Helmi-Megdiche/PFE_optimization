@@ -1,900 +1,332 @@
-# AI Parental Control Platform – PFE Project
+# SafeGuard — AI Parental Control Platform (PFE)
 
 **Student:** Helmi Megdiche – ESPRIT (5th year)  
 **Internship period:** 01/02/2026 – 31/07/2026  
-**Repository:** [github.com/Helmi-Megdiche/PFE](https://github.com/Helmi-Megdiche/PFE)  
-**Product requirement:** Production-ready, privacy-first, industrial grade
+**Repository:** [github.com/Helmi-Megdiche/PFE_optimization](https://github.com/Helmi-Megdiche/PFE_optimization)  
+**Version:** Current `main` (post-Phase B, September 2026). v1.0-final (5 June 2026, `59da85b`) was the pre-Phase-B release.
 
 ---
 
 ## Table of Contents
 
-- [Project Overview](#project-overview)
-- [Problem Statement & Objectives](#problem-statement--objectives)
-- [System Architecture](#system-architecture)
-  - [Adaptive Capture](#adaptive-capture)
-- [Tech Stack](#tech-stack)
-- [Repository Structure](#repository-structure)
-- [Prerequisites](#prerequisites)
-- [Setup & Installation](#setup--installation)
-  - [Backend (Node.js + PostgreSQL)](#backend-nodejs--postgresql)
-  - [Mobile App (React Native – Android)](#mobile-app-react-native--android)
-- [Configuration](#configuration)
-  - [JWT Authentication](#jwt-authentication)
-  - [Mission cooldown (development)](#mission-cooldown-development)
-  - [Cooldowns & timers (reference)](#cooldowns--timers-reference)
-  - [API Base URL for Physical Devices](#api-base-url-for-physical-devices)
-  - [Firewall & Network](#firewall--network)
-- [Running the Application](#running-the-application)
-- [API Endpoints (Sprint 1)](#api-endpoints-sprint-1)
-- [Testing the Screen Monitoring Pipeline](#testing-the-screen-monitoring-pipeline)
-- [Privacy & Security](#privacy--security)
-- [Sprint Status](#sprint-status)
-- [Next Steps (Sprint 2)](#next-steps-sprint-2)
-- [Documentation for Final Report](#documentation-for-final-report)
+- [What SafeGuard does](#what-safeguard-does)
+- [Privacy model](#privacy-model)
+- [Architecture at a glance](#architecture-at-a-glance)
+- [Features](#features)
+  - [Screen analysis and risk](#screen-analysis-and-risk)
+  - [Adaptive capture](#adaptive-capture)
+  - [Missions and games](#missions-and-games)
+  - [Adult-site blocking in Chrome](#adult-site-blocking-in-chrome)
+  - [Parent dashboard](#parent-dashboard)
+- [Tech stack](#tech-stack)
+- [Repository structure](#repository-structure)
+- [Getting started](#getting-started)
+- [Running the tests](#running-the-tests)
+- [Troubleshooting](#troubleshooting)
+- [Known limitations / future work](#known-limitations--future-work)
+- [Documentation](#documentation)
 - [License](#license)
 
 ---
 
-## Project Overview
+## What SafeGuard does
 
-This project adds an **intelligent layer** to a classic parental control application by combining:
+Classic parental-control apps restrict (block apps, limit screen time) without understanding what the child is doing. SafeGuard adds a layer of behavioural intelligence on an Android child device:
 
-- **Usage-based behavioural analysis** – detects early signs of smartphone addiction and calculates a daily digital well-being score (Sprint 2+).
-- **Real-time screen content analysis** – uses on-device OCR and lightweight keyword classification to identify risky content (violent, toxic, dangerous challenges) **without sending any screenshot to the cloud**.
-- **Gamified real-world missions** – when risk thresholds are reached, the child receives educational missions (physical activity, family interaction, creative tasks). Points and badges unlock real-life rewards defined by parents (later sprints).
+- **Screen content analysis on the device** — on-device OCR (English, French, Arabic, Tunisian Derja/Arabizi), a multilingual keyword filter and an on-device image model detect adult, violent, toxic and dangerous content **without any screenshot leaving the phone**.
+- **Adult-site blocking in Chrome** — an Accessibility service blocks known adult domains and learns new ones from what the image model sees.
+- **Usage-based scores** — a daily addiction-risk score and a daily digital well-being score.
+- **Gamified missions** — risky content or unhealthy usage triggers age-adapted missions (quizzes, games, real-world activities). Points, badges and parent-defined rewards follow.
+- **Parent dashboard** — a web page for monitoring, mission approval, rewards, interests and blocked-site history.
 
-The system is built for **Android** (React Native) with a Node.js backend and PostgreSQL database. All sensitive processing (OCR, keyword filtering) happens **on the child's device** to guarantee privacy and align with GDPR / COPPA principles.
-
----
-
-## Problem Statement & Objectives
-
-**Problem:** Existing parental control apps focus on restriction (blocking apps, limiting screen time) without behavioural intelligence. Children remain exposed to addictive patterns and dangerous content.
-
-**Objectives (merged from two specifications):**
-
-1. **Addiction risk score** – based on intensity, compulsivity, night usage, escalation, and real-world imbalance.
-2. **Digital well-being score** – screen balance, content quality, real activity, sleep consistency, family interaction.
-3. **Screen content analysis** – OCR + keyword classification (violent, toxic, dangerous challenges, educational).
-4. **Real-world missions** – triggered by high-risk content or unhealthy usage patterns.
-5. **Gamification** – points, badges, parent-defined rewards.
-6. **Parent dashboard** – real-time monitoring of both usage scores and risky content events.
+The child app is **Android-only** (React Native), with a Node.js + PostgreSQL backend.
 
 ---
 
-## System Architecture
+## Privacy model
+
+No image or screenshot is ever uploaded. Release builds delete the screenshot file right after processing. Debug builds keep it in the app's private storage on the device for inspection. In both, no image or screenshot is ever uploaded.
+
+What the backend receives is exactly:
+
+| Data | Where it comes from |
+|------|---------------------|
+| Text preview (≤ 500 chars) | OCR of the screen |
+| Scores and categories | On-device risk scoring (numeric scores, an enum category, app package/label, and a schema-bounded classifier-details object with every string length-capped and unknown keys stripped) |
+| The host of a learned adult domain | Chrome address bar, host only |
+| Browser block incidents | Host, list source (`static` / `detected`), time |
+
+- The address-bar read keeps only the host; the full URL and path are never stored or sent.
+- The text preview (≤500 chars) is OCR of whatever is visible on screen, so it can include any text shown there, including a web address. That preview is what reaches the backend.
+- In all builds, the first 80 characters of the preview are also written to the device's local log (logcat). It stays on the phone and other apps can't read it.
+
+Every field is validated server-side (`backend/src/validators/`). Monitoring starts only after the MediaProjection consent dialog. The design follows GDPR / COPPA data-minimisation principles. The server-side debug tools (`/api/debug/*`, used only by the dashboard's debug panels to validate OCR and classification) accept uploaded images and are not mounted in production.
+
+---
+
+## Architecture at a glance
 
 ```mermaid
 graph TB
-    subgraph ChildDevice["Child Device (Android)"]
-        A[React Native App] --> B[ScreenCaptureModule<br/>Java MediaProjection]
-        B --> C[ML Kit OCR<br/>on-device]
-        C --> D[Keyword Filter]
-        D --> E[apiClient JWT]
-        F[Foreground Tracker<br/>Sprint 2] -.-> E
+    subgraph ChildDevice["Child device (Android)"]
+        CAP[Screen capture<br/>MediaProjection] --> AI[On-device OCR + keywords<br/>+ NSFW TFLite + ML Kit labels]
+        AI --> RISK[combinedRiskScore]
+        A11Y[Accessibility service] --> BLK[Chrome blocker<br/>static + learned lists]
+        A11Y --> CAP
+        RISK --> OVL[Mission overlay / MissionScreen]
+        RISK --> BLK
     end
-
     subgraph Backend["Backend (Node.js + PostgreSQL)"]
-        G[Express API] --> H[verifyToken middleware]
-        H --> I[POST /api/screen-events]
-        H --> J[POST /api/usage<br/>Sprint 2]
-        H --> K[GET /api/scores<br/>Sprint 2]
-        I --> L[(screen_events)]
-        J --> M[(usage_sessions)]
-        K --> N[(daily_scores)]
-        O[Cron node-cron<br/>Sprint 2] --> N
+        API[Express API + JWT] --> DB[(PostgreSQL)]
+        CRON[Daily score cron] --> DB
+        GEN[Mission generator] --> DB
     end
-
-    subgraph ParentUI["Parent Dashboard"]
-        P[Dashboard UI] --> G
+    subgraph Parent["Parent"]
+        DASH[demo_dashboard.html]
     end
-
-    E --> G
+    RISK -- "text preview + scores" --> API
+    BLK -- "learned host + incidents" --> API
+    API -- "newMission" --> OVL
+    DASH --> API
 ```
 
-### Data flow (Sprint 1)
-
-1. Child grants **MediaProjection** permission (foreground service on Android 14+).
-2. Every **30 seconds**, `ScreenCaptureModule` captures a screenshot and saves a temporary JPEG on device.
-3. The hook `useScreenshotCapture` loads the image, runs the **hybrid multilingual OCR** (`mixedScriptOcr.ts`: ML Kit + UI noise filter + Arabizi normalization), and applies the **multilingual keyword filter** (English + French + Arabic + Tunisian Derja).
-4. Only text metadata is sent to `POST /api/screen-events` – a ≤500-char extracted-text preview, risk flag, numeric scores, category, and a schema-bounded `imageClassificationDetails` object (a fixed set of named fields: classifier scores + model-label vocabulary, every string length-capped, unknown keys stripped); the image is deleted immediately.
-5. Backend stores metadata in the `screen_events` table.
-
-### Adaptive Capture
-
-Sprint **3.7** replaces a fixed periodic interval with a **risk-based adaptive strategy** so the app reacts quickly after risky content without draining the battery when risk is low.
-
-| Trigger | When it fires |
-|---------|----------------|
-| **App switch** | **Accessibility window events** when the SafeGuard accessibility service is connected (near-instant); otherwise the fallback **UsageStats poll every 1s** when another app is foreground → `captureNow()`. Also on `AppState` background (leaving SafeGuard). Baseline `com.mobileapp` while SafeGuard is active (UsageStats omits own package) |
-| **Follow-up** | 5 seconds after app switch, unless a capture completed within the last 2 seconds |
-| **Periodic (adaptive)** | Rolling average of the last **3** `combinedRiskScore` values sets the interval |
-| **Keyboard suppression** | While the soft keyboard is visible (accessibility keyboard event), routine periodic re-scans are paused; app switches and risk follow-ups still capture |
-
-| Average risk (last 3 captures) | Periodic interval (risk base) |
-|--------------------------------|-------------------|
-| > 70 | 10 seconds |
-| 30 – 70 | 15 seconds |
-| < 30 | 20 seconds |
-
-Ordering invariant: **HIGH ≤ MEDIUM ≤ LOW** (higher risk must scan at least as often as lower risk).
-
-**App-aware periodic interval:** the risk base above is adjusted by foreground app category (`MobileApp/src/utils/appCapturePolicy.ts`). Recomputed on risk change and app switch.
-
-| App category | Packages (examples) | Effective periodic interval |
-|--------------|---------------------|----------------------------|
-| `browser_social` | Chrome, Instagram, TikTok, YouTube, WhatsApp, Facebook | `min(risk base, 15s)` |
-| `game` | Roblox, Minecraft, Clash of Clans | **0** (app-switch + follow-up only) |
-| `education` | Khan Academy, Duolingo | `max(risk base, 120s)` |
-| `system` | Stock launchers | **0** |
-| `default` | Other apps | risk base unchanged |
-
-**Single native-driven clock (A3c-2 / A3c-3).** The old model — a native `startCapture(20s)` loop plus a separate JS `setTimeout` adaptive chain — is **retired**. The native capture loop no longer captures on its own timer: it emits `onNativePeriodicTick` (bare `{timestamp}`) every `NATIVE_TICK_INTERVAL_MS` = **5 s** from one `Handler.postDelayed` loop on `ScreenCaptureThread`, kept unfrozen by the `mediaProjection` foreground service (no `AlarmManager`/`WorkManager`). `useScreenshotCapture` **subsamples** each tick — `shouldEmitPeriodicCapture(now, lastPeriodicPassAtRef, dynamicIntervalMsRef)` passes only if the effective adaptive interval has elapsed and the target is `> 0` — then routes survivors through the same coordinator door (`tryCaptureNow('PERIODIC_FALLBACK')`) as every other reason, so periodic capture now also gets keyboard-suppression, mission-pause, the 5 s debounce and native-rejection handling. 5 s divides 10/15/20/120 exactly, so every effective interval (incl. the 15 s `browser_social` clamp) is realized without quantization. Because the tick runs natively, background high-risk now scans at its real 10 s tier, not the old fixed ~20 s.
-
-**Mission overlay debounce:** the same pending mission is not re-shown within **90s**; **re-surfaced** missions during cooldown use a **60s** minimum gap (same mission id). **Re-surfaced** missions are suppressed for **8s** after monitoring starts (avoids quiz spam on toggle-on). Backend does **not** re-surface `pending_approval` or completed **real_world** missions. Overlays are skipped when the resolved foreground is a **launcher/home** package; `inferAppPackageFromOcr` overrides MIUI/SafeGuard mis-attribution for Messenger/Chrome/WhatsApp inbox OCR.
-
-**Social inbox benign context:** Messenger/WhatsApp home inbox OCR (`Q or search`, stories, chat list) is scored **neutral** unless explicit adult URLs appear. Explicit Google omnibar queries (`Q nsfw`, `NSFW eo google.com/sea`) still trigger enforcement even when Fiverr/design gigs appear in SERP body text.
-
-**Launcher recents bleed:** when the foreground app is the home launcher and OCR is only a **recents-widget thumbnail** (pornhub card on MIUI home), the event is stored as **neutral**. Full **browser SERP** or **Messenger chat** OCR is not neutralized — enforcement runs on the inferred app package.
-
-**Filtered SERP cap:** on Google/Bing/DuckDuckGo pages with SafeSearch / **Mode IA** / **Flouter** UI and TFLite &lt; 30, combined risk is capped (~24) unless OCR shows an explicit **search-box** query (`Q porn`, `+ Q nsfw`, or a keyword-filter hit like `Q zebi`). Body-only keywords in result titles (e.g. youporn) do not bypass the cap. On Mode IA pages, `benignRiskContext` keeps search-box keyword hits and drops body-only noise. Hung OCR locks: the newest frame is deferred while OCR is busy; after **8s** the lock is taken over so post-mission captures are not stuck behind `OCR already in progress`.
-
-**Post-mission capture:** when a blocking mission ends, foreground package is **snapshotted on pause** and may be reused for **120s** if UsageStats briefly returns `unknown` after resume; `resumeCapture` also **refreshes** the foreground cache. The overlay is shown **before** capture pauses so MIUI does not attribute the frame to SafeGuard. Capture frames reuse a **120s grace cache** before calling native UsageStats again.
-
-**Wedged-frame recovery (A3c-2c / D1 / D3).** A frame that hangs in `processCapturedFrame` (a native OCR / UsageStats / API-POST promise that never settles) used to latch `isProcessingRef` and silently stop all monitoring — the in-frame **25 s processing watchdog** and **5 s heartbeat** are RN `setTimeout`/`setInterval` and are frozen while SafeGuard is backgrounded. Layered recovery, all driven from the native 5 s tick (`decideTickAction`, pure):
-
-| Guard | Trigger | Notes |
-|-------|---------|-------|
-| **Tick-liveness backstop (A3c-2c)** | OCR lock held past `OCR_LOCK_LIVENESS_MS` = **60 s** | `forceReleaseProcessingLock('tick-liveness')`. The one recovery that survives backgrounding — **but only while the screen is on**; MIUI freezes the RN JS thread on screen-off, so a frame that wedges while the phone is locked is recovered only when the screen wakes. |
-| **Per-phase deadline (D1)** | `foreground_lookup` phase > **10 s**, `api_post` > **20 s** | `tick-phase-timeout:<phase>`. Faster than the 60 s absolute for the two phases with an unambiguous budget. `vision` deliberately has **no** phase deadline (no measured backgrounded duration to set one) — it rides the 60 s backstop. |
-| **In-frame watchdog / heartbeat** | 25 s / hung native call | Foreground only (frozen when backgrounded). |
-| **OCR-lock takeover** | new frame arrives, lock held > **8 s** | Newest frame takes over so post-mission captures are not stuck behind `OCR already in progress`. |
-| **Generation token** | every acquire (`++processingGenerationRef`) | A superseded frame's late `finally` / watchdog / heartbeat becomes a no-op. **D3:** the `finally`'s `processingStartTimeRef` reset is now *inside* the generation guard, so a stale frame resolving late can no longer zero the active frame's start stamp (which would have disabled the 60 s backstop for it). |
-
-OCR + TFLite are still capped at `VISION_PIPELINE_TIMEOUT_MS` = **25 s** per frame (`vision_timeout` skip) when foregrounded.
-
-**Background foreground-lookup self-heal:** while the child is in another app, RN often **freezes JS `setTimeout`/`setInterval`**, so timer-based `withTimeout` guards cannot abort a hung UsageStats IPC. A wedged single-flight promise used to poison every later frame (`OCR lock takeover` forever, no OCR / no missions). `ForegroundApp.ts` now **abandons stale in-flight lookups** (`isForegroundLookupStuck` after **2.5s** wall-clock), and `useScreenshotCapture` **skips awaiting** a wedged lookup — attributes `unknown` for that frame, kicks a fresh lookup, and continues OCR/risk so detection never blocks on attribution. `stopMonitoring` calls `resetForegroundLookup()`. This protects the *next* frame; the frame already stuck is recovered by the tick-liveness backstop / D1 per-phase deadline above. The underlying `withTimeout` unsoundness (a JS-timer race that can't win while backgrounded) is not yet fixed at the source.
-
-**Accessibility-driven app-switch capture:** on device the 1s UsageStats poll can go blind for minutes (`Foreground cache stale — live lookup failed`), producing **zero** app-switch captures. When the child enables the **SafeGuard accessibility service** (Settings → Accessibility), `SafeGuardAccessibilityService` window events drive app-switch captures directly — a screenshot fires the instant the foreground package changes instead of up to a second later. `useAccessibilityEvents` (mounted in `useScreenshotCapture`) reports `{ connected }`; while it is *driving* (connected **and** a window event seen within `A11Y_STALE_MS` = **60s**), the poll's own `triggerAppSwitchCapture` calls are suppressed but the poll keeps running for its foreground-cache writes (OCR attribution depends on them; the accessibility handler mirrors the same `lastAppPackageRef` writes before it triggers). If the service is off, or connected but silent for 60s (crashed/unbound), the poll is the **unchanged fallback** — behaviour is byte-for-byte what it was before.
-
-The raw window-event feed is noisy, so `MobileApp/src/capture/windowEventFilter.ts` (pure, injected clock, unit-tested) collapses it: `createWindowEventFilter().accept(pkg)` rejects **`OWN_PACKAGE`** (SafeGuard's own window) → **`IME`** (`isImePackage` heuristic — `inputmethod`/`latin`/`swiftkey`/`gboard`/`.ime` substrings + exact `com.google.android.inputmethod.latin`, which fires ~14ms *before* the keyboard event) → **`SAME_PACKAGE`** → **`LAUNCHER_SETTLING`** (within `LAUNCHER_SETTLE_MS` = **1500ms** of the last accepted change when either side is a launcher surface — treats `com.google.android.googlequicksearchbox` as a launcher alongside `isLauncherPackage`, so the `com.miui.home ↔ googlequicksearchbox` flap on the launcher's `-1` screen yields **one** capture, not four). The filter is `reset()` on every monitoring start **and** stop.
-
-**Keyboard suppression:** `onAccessibilityKeyboardChanged` calls `coordinator.setKeyboardVisible(bool)`. While true, `requestCapture` drops **only** the three routine reasons `PERIODIC_FALLBACK`, `CONTENT_CHANGE`, `SCROLL_SETTLED` (returns `KEYBOARD_SUPPRESSED`); every app-switch reason, `BROWSER_NAVIGATION`, `RISK_FOLLOW_UP` and `APP_SWITCH_FOLLOW_UP` still pass — safety monitoring never stops while the child is typing, only routine screenshotting. `isKeyboardSuppressibleReason` (in `captureCoordinator.ts`) is the single source of that list. The latch is force-cleared on accessibility disconnect and on `stopMonitoring` so a dead service with the keyboard open cannot suppress captures forever. No capture is fired on keyboard-close in this iteration. `onAccessibilityScroll` drives a **tick-driven scroll-settle** capture (A3c-3): `SCROLL_SETTLED` fires once a scroll burst has been quiet for `SCROLL_SETTLE_MS` = **2 s**, evaluated on the same native tick (no JS timer), keyboard-suppressible, with a `max(10 s, effective periodic interval)` cooldown. **Privacy:** package names and booleans only — no `AccessibilityNodeInfo` content, node text, URLs, or field values are read.
-
-**Debounce:** at least **5 seconds** between any two captures (JS + native `captureNow`). Very fast app switches within that window may delay the frame until the follow-up or periodic timer fires (~5–20s). **Blank/loading Chrome tabs** (empty page, still loading, Incognito/DRM) often produce neutral scores with Sky/Space ML Kit labels — wait for the page to load before switching away. **UX:** no extra popups beyond MediaProjection and the foreground-service notification; Usage access is optional but improves `appPackage` / `appLabel` accuracy.
-
-Implementation: `MobileApp/src/hooks/useScreenshotCapture.ts`, `MobileApp/src/capture/captureCoordinator.ts`, `MobileApp/src/capture/windowEventFilter.ts`, `MobileApp/src/hooks/useAccessibilityEvents.ts`, `MobileApp/src/native/SafeGuardAccessibility.ts`, `MobileApp/src/utils/adaptiveCapture.ts`, `MobileApp/src/utils/appCapturePolicy.ts`, `MobileApp/src/native/ForegroundApp.ts`, native `ForegroundAppModule` (UsageStats), `SafeGuardAccessibilityService` (window/IME/scroll events) and `ScreenCaptureModule.captureNow()`. At capture time, `resolveForegroundAppWithRetry()` queries UsageStats (UsageEvents window **120s**, `queryUsageStats` fallback limited to apps used in the last **5s**). If live lookup fails, the 1s poll cache is used only when younger than **30s**; `com.android.systemui` and launcher packages are never reported. **Rebuild required** after native `ForegroundAppModule.java` / `SafeGuardAccessibilityService` changes. Pure logic (`captureCoordinator`, `windowEventFilter`) is unit-tested — `__tests__/captureCoordinator.test.ts`, `__tests__/windowEventFilter.test.ts`.
+Full component, data, runtime and deployment views: [docs/architecture.md](docs/architecture.md).
 
 ---
 
-## Tech Stack
+## Features
+
+### Screen analysis and risk
+
+Each processed frame runs ML Kit OCR (with an Arabic Tesseract fallback), a UI-noise filter, Arabizi normalization and the EN/FR/AR/Derja keyword filter, plus Yahoo Open NSFW (`nsfw.tflite`, 224×224) and ML Kit image labels. They combine as:
+
+```
+combinedRiskScore = OCR × 0.3 + vision × 0.7      (MobileApp/src/utils/riskCombination.ts)
+```
+
+Context rules then correct known false positives (filtered search pages, social inboxes, launcher thumbnails). Formulas: [docs/scoring_formulas.md](docs/scoring_formulas.md). OCR layers and vision detail: [architecture §7](docs/architecture.md#7-on-device-ai-pipeline).
+
+### Adaptive capture
+
+Capture is triggered by app switches (from the Accessibility service, or a 1 s UsageStats poll as fallback), a follow-up 5 s later, scroll settling, and a periodic re-scan whose interval follows recent risk: **10 s** (average > 70), **15 s** (30–70), **20 s** (< 30), adjusted by app category (browsers/social ≤ 15 s, games off, education ≥ 120 s). One native 5 s tick drives the periodic path; a 5 s debounce bounds load. Detail, including wedged-frame recovery and every timer: [architecture §7.3](docs/architecture.md#73-adaptive-capture), [§8.5](docs/architecture.md#85-timers-reference) and [§10.1](docs/architecture.md#101-wedged-frame-recovery).
+
+### Missions and games
+
+A risky capture creates a mission when `combinedRiskScore` exceeds an adaptive threshold (7-day average + 10, clamped 50–80), or when the last 5 events in 30 min sum to more than 300 (at least 3 events). The daily cron also creates missions for low well-being (< 40) or high addiction (> 70). A new risky-content mission is blocked while a **pending** risky mission exists or one was **escaped/abandoned (failed)** within `MISSION_RISK_COOLDOWN_MINUTES` (15 min; 2 min in development); a further risky capture re-surfaces the existing mission instead.
+
+There are **6 playable games**. Quiz and Tic-Tac-Toe play inside the overlay, and real-world missions are confirmed there; Sudoku, N-back, Reaction and Tower of Hanoi open in the app. N-back is not in the adult or violent mission pools; it stays in the high-addiction pool. Quiz questions come from the database (22 questions: safety 5, conflict 5, empathy 4, media_violence 8). A Tic-Tac-Toe result is accepted only after the server replays the submitted moves. Rules, pools, completion payloads, badges and timers: [architecture §8](docs/architecture.md#8-backend-internals).
+
+### Adult-site blocking in Chrome
+
+With the SafeGuard Accessibility service enabled, the app reads Chrome's address bar, keeps only the host, and checks it against a bundled list of **76,774** adult domains (StevenBlack porn-only) and a list learned on the device.
+
+- **Known domain:** Back about 130 ms after the address-bar event, then a full-screen block screen. Its OK opens a fresh blank Chrome tab.
+- **New domain:** when a Chrome screenshot is classified adult with a raw NSFW score ≥ 0.7, the domain is learned and Back is pressed; a repeat visit is blocked in 117–160 ms. A page that reads as adult from its text alone gets Back only, with no list write.
+- **Sync:** learned domains reach the backend (`blocked_domains`) through an offline queue with backfill and reconciliation; blocks are recorded as incidents (`browser_block_incidents`). Removal is development-only.
+
+Detail: [architecture §7.4](docs/architecture.md#74-adult-site-blocking-chrome).
+
+### Parent dashboard
+
+Served by the backend at [`http://localhost:3000/demo.html`](http://localhost:3000/demo.html) straight from the repo-root [`demo_dashboard.html`](demo_dashboard.html). Edit the file and reload. It has a Monitoring tab (events, 7-day chart, debug tools) and a Parent Dashboard tab (profile, scores, approvals, rewards, badges, interests, custom missions, blocked sites, browser incidents). The open page refreshes every 10 s; browser pop-ups fire only for missions awaiting approval and escaped missions. There is no push, email or SMS notification. Use the backend URL, not `file://`, so browser notifications work. Tabs in full: [architecture §3.3](docs/architecture.md#33-parent-dashboard).
+
+---
+
+## Tech stack
 
 | Component | Technology |
 |-----------|------------|
-| Mobile frontend | React Native 0.74.5 + TypeScript |
-| Native module | Java (MediaProjection API, foreground service) |
-| OCR | `@react-native-ml-kit/text-recognition` (Google ML Kit, Latin script) + `cleanOcrText` UI filter + Arabizi normalization (`MobileApp/src/services/mixedScriptOcr.ts`) |
+| Mobile app | React Native 0.74.5 + TypeScript (Android) |
+| Native modules | Java / Kotlin — MediaProjection capture + frame-skip hash, UsageStats, overlay window, Accessibility service + Chrome blocker, TFLite |
+| OCR | Google ML Kit text recognition + Tesseract `ara` fallback (`@devinikhiya/react-native-tesseractocr`) |
+| Vision | Yahoo Open NSFW (`nsfw.tflite`) + ML Kit image labeling |
 | Backend | Node.js + Express + TypeScript |
-| Database | PostgreSQL 16 (Docker) or local PostgreSQL 14+ |
-| Authentication | JWT (AsyncStorage on device) |
-| Background jobs | node-cron (planned Sprint 2) |
-| Version control | Git + GitHub |
+| Database | PostgreSQL 16 (Docker) or local PostgreSQL 14+; plain SQL migrations with a `schema_migrations` ledger |
+| Authentication | JWT (development-minted tokens; AsyncStorage on the device) |
+| Background jobs | `node-cron` daily score job, 01:00 in `APP_TIMEZONE` |
 
 ---
 
-## Repository Structure
+## Repository structure
 
 ```text
-PFE/
+PFE_optimization/
 ├── backend/
 │   ├── src/
-│   │   ├── middleware/          # verifyToken, auth, validation
-│   │   ├── routes/                # screen-events, dev token
-│   │   ├── db/migrations/         # 000_init, 001_screen_events, 002_dev_seed
-│   │   └── index.ts
-│   ├── .env.example
-│   ├── docker-compose.yml         # Postgres on host port 5433
-│   └── package.json
-├── MobileApp/                     # Primary React Native app (use this)
-│   ├── android/
-│   │   └── app/src/main/java/com/mobileapp/
-│   │       ├── screencapture/     # ScreenCaptureModule, FrameHasher (dHash gate), Package
-│   │       ├── overlay/           # OverlayService, OverlayMissionModule (Sprint 5)
-│   │       ├── accessibility/     # SafeGuardAccessibilityService, EventBridge, Module, Package
-│   │       └── MediaProjectionForegroundService.java
-│   ├── src/
-│   │   ├── navigation/            # React Navigation tabs + MissionScreen stack
-│   │   ├── screens/               # Monitor, Missions, Rewards, Badges, Profile
-│   │   ├── missions/              # presentMissionFromCapture, missionCompletion
-│   │   ├── capture/               # captureCoordinator, windowEventFilter (pure, unit-tested)
-│   │   ├── native/                # OverlayMission.ts, ScreenCapture.ts, SafeGuardAccessibility.ts
-│   │   ├── hooks/                 # useScreenshotCapture.ts, useAccessibilityEvents.ts, useMissionOverlayListener.ts
-│   │   ├── services/              # apiClient, missionsApi, screenEventsApi
-│   │   ├── config/apiConfig.ts
-│   │   └── utils/keywordFilter.ts
-│   └── package.json
-├── demo_dashboard.html            # Parent dashboard — served directly at /demo.html (no sync step)
-├── docs/                          # Report artefacts (to be expanded)
-├── README.md
-└── .gitignore
+│   │   ├── routes/            # screen-events, usage, scores, missions, rewards, badges, bonus,
+│   │   │                      # custom-missions, child, blocked-domains, browser-incidents, dev, debug
+│   │   ├── middleware/        # verifyToken, childAccess (parent→child ownership), validation
+│   │   ├── services/          # mission generator/helpers/completion, gamification, quiz, blocked domains
+│   │   ├── scoring/           # scoring engine, usage aggregation, wellbeing proxies
+│   │   ├── jobs/              # daily score cron
+│   │   ├── validators/        # Joi schemas
+│   │   └── db/                # migrate.ts (ledger), migrations/000_init … 016_blocked_domains
+│   ├── tests/                 # Jest (247 tests / 24 suites)
+│   ├── scripts/               # smoke scripts
+│   └── docker-compose.yml     # Postgres on host port 5433
+├── MobileApp/
+│   ├── android/app/src/main/
+│   │   ├── java/com/mobileapp/
+│   │   │   ├── screencapture/ # ScreenCaptureModule, FrameHasher
+│   │   │   ├── foreground/    # ForegroundAppModule (UsageStats)
+│   │   │   ├── overlay/       # OverlayService, native quiz / Tic-Tac-Toe, block screen
+│   │   │   ├── accessibility/ # SafeGuardAccessibilityService, browser/ (Chrome blocker)
+│   │   │   └── nsfw/          # NsfwTflite
+│   │   └── assets/            # adult_domains.txt, never_block_domains.json, models/, tessdata/
+│   ├── android/app/src/test/  # JVM tests (155)
+│   ├── src/                   # capture, hooks, services, missions, screens, native bridges, theme
+│   └── __tests__/             # Jest (517 tests / 37 suites)
+├── scripts/                   # run-all-tests.ps1, build-adult-list.js
+├── demo_dashboard.html        # Parent dashboard — served at /demo.html
+├── docs/                      # Formal documentation (see below)
+├── NOTICE                     # Third-party list licence (StevenBlack/hosts, MIT)
+└── README.md
 ```
 
 ---
 
-## Prerequisites
+## Getting started
 
-- **Node.js** v18 or v20
-- **npm** or yarn
-- **PostgreSQL** 14+ or **Docker Desktop** (recommended)
-- **Android Studio** with SDK (API 29+)
-- **Java 17** (Gradle)
-- **Physical Android device** (API 29+) or emulator
-- **Git**
+### Prerequisites
 
----
+- Node.js 18 or 20, npm
+- Docker Desktop (recommended) or PostgreSQL 14+
+- Android Studio with SDK (API 29+), Java 17
+- A physical Android device (API 29+) or an emulator
 
-## Setup & Installation
-
-### 1. Clone the repository
+### Backend
 
 ```bash
-git clone https://github.com/Helmi-Megdiche/PFE.git
-cd PFE
-```
-
-### 2. Backend (Node.js + PostgreSQL)
-
-```bash
-cd backend
+git clone https://github.com/Helmi-Megdiche/PFE_optimization.git
+cd PFE_optimization/backend
 npm install
 cp .env.example .env
+npm run db:setup       # docker compose up (Postgres on host :5433) + migrations
+npm run dev            # http://localhost:3000
 ```
 
-Edit `.env` with your database credentials. The example uses Docker on **port 5433**:
+`.env` needs `DATABASE_URL` and `JWT_SECRET` (the server stops at boot without them). Optional: `PORT` (3000), `NODE_ENV`, `JWT_ISSUER`, `APP_TIMEZONE` (default `Africa/Tunis`), `MISSION_RISK_COOLDOWN_MINUTES` (15 in production; 2 in development). All variables: [docs/deployment.md §3](docs/deployment.md#3-environment-configuration).
 
-```env
-DATABASE_URL=postgresql://postgres:postgres@localhost:5433/pfe_parental_control
-JWT_SECRET=your_super_secret_key_change_in_production
-PORT=3000
-```
+`npm run db:migrate` applies `src/db/migrations/000`–`016` through a `schema_migrations` ledger: each file runs once, in its own transaction; re-running is a no-op, and editing an applied file is refused. With a local PostgreSQL, create the database `pfe_parental_control` and still use `npm run db:migrate`, never run the files by hand.
 
-**Using Docker (recommended):**
-
-```bash
-npm run db:up          # starts PostgreSQL container (host port 5433)
-npm run db:migrate     # runs SQL migrations
-```
-
-**Using local PostgreSQL:** create database `pfe_parental_control` and run files in `src/db/migrations/` in order.
-
-**Start the API:**
-
-```bash
-npm run dev
-# Listening on http://localhost:3000
-```
-
-### 3. Mobile App (React Native – Android)
+### Mobile app
 
 ```bash
 cd ../MobileApp
 npm install
+npm start              # Metro (port 8081)
+npm run android        # build & install
 ```
 
-- Open `MobileApp/android` in Android Studio if SDK components are missing.
-- Ensure `minSdkVersion` 29 and `compileSdkVersion` 34 in `android/build.gradle`.
-- Enable USB debugging on a physical device, or start an emulator (API 29+).
+On Windows with the repository under OneDrive, `npm run android` fails; see the OneDrive row in [deployment §11](docs/deployment.md#11-troubleshooting). The project uses `minSdkVersion` 29 and `compileSdkVersion` 34. Native changes need a full rebuild; JS-only changes reload from Metro.
 
-```bash
-npm start          # Terminal 1 – Metro (port 8081)
-npm run android    # Terminal 2 – build & install
-```
+**Backend URL on the device** (`MobileApp/src/config/apiConfig.ts`): the emulator uses `10.0.2.2:3000` automatically. On a USB device, run `adb reverse tcp:3000 tcp:3000` and `adb reverse tcp:8081 tcp:8081` and keep `DEV_LAN_HOST = '127.0.0.1'`. For a phone on the same Wi-Fi, set `DEV_LAN_HOST` to your PC's Wi-Fi IPv4, allow inbound TCP 3000 in the firewall, and check `http://<YOUR_IP>:3000/api/health` from the phone's browser.
 
----
+**Authentication in development:** the app fetches a child JWT from `/api/dev/child-token` (7-day lifetime, refreshed automatically on expiry, on a 401, or via Profile → **Log out / refresh JWT**); the dashboard uses `/api/dev/parent-token`. These routes exist only when `NODE_ENV` is not `production`. Every child-scoped route also checks parent→child ownership (403 otherwise). There is no real sign-in yet.
 
-## Configuration
+### Device setup
 
-### JWT Authentication
+| Permission | Why |
+|------------|-----|
+| MediaProjection consent | Screen capture; asked when monitoring is switched on |
+| Usage Access (optional) | Accurate app attribution |
+| Display over other apps | Mission overlay above other apps (otherwise a notification opens the mission in the app) — see [`MobileApp/android/NATIVE_SETUP.md`](MobileApp/android/NATIVE_SETUP.md) |
+| Accessibility → SafeGuard | Chrome blocking and instant app-switch detection; enabled by hand |
+| Notifications | Foreground-service and mission notifications |
 
-Protected routes require `Authorization: Bearer <token>`. Every route scoped to a `childId`
-also enforces **parent→child ownership** (`requireChildAccess` / `userCanAccessChild` in
-`backend/src/middleware/childAccess.ts`): a parent token only reaches a child in its own
-`children.parent_id`, a child token only its own `childId` claim; otherwise `403`. This is
-authorization on top of a valid token — the tokens themselves are still dev-minted
-(`/api/dev/*-token`); there is no real authentication yet.
+On some Android ROMs, swiping SafeGuard away from Recents stops the Accessibility service, and reopening the app does not restore it. Re-enable it by hand in Settings → Accessibility. To check it's running, look for a live window-change event in the logs; `settings get … enabled_accessibility_services` is not a reliable check. The Monitor tab's **Accessibility service** card reads **Active** once the service has delivered an event.
 
-| Route | Auth |
-|-------|------|
-| `GET /api/health` | Public |
-| `GET /api/dev/child-token` | Dev only (`NODE_ENV=development`) |
-| `POST /api/screen-events` | Child JWT |
-| `GET /api/screen-events/:childId` | Parent JWT |
-| `POST /api/usage` | Child JWT |
-| `GET /api/usage/:childId` | Parent JWT |
-| `GET /api/scores/:childId` | Parent JWT |
-| `GET /api/scores/:childId/trend` | Parent JWT |
+### First run
 
-In development, `useDevChildToken` fetches a child JWT from `/api/dev/child-token` (seeded child in migration `002_dev_seed.sql`) and stores it in AsyncStorage via `tokenStorage`. Dev tokens expire in **7 days** (`expiresIn: '7d'` on the backend).
+| Terminal | Directory | Command |
+|----------|-----------|---------|
+| 1 | `backend` | `npm run dev` |
+| 2 | `MobileApp` | `npm start` |
+| 3 | `MobileApp` | `npm run android` |
 
-**Expired / invalid session handling (mobile):**
-
-| Trigger | Behaviour |
-|---------|-----------|
-| Stored JWT has past `exp` | Cleared on startup; a fresh `/api/dev/child-token` is fetched automatically |
-| API returns **401** | `apiClient` clears AsyncStorage and requests a session refresh (no redbox during capture) |
-| Profile → **Log out / refresh JWT** | Clears stored JWT + child id, then forces the same refresh path so monitoring can resume with a new token |
-
-Implementation: `MobileApp/src/auth/useDevChildToken.ts`, `authSession.ts`, `jwtUtils.ts` (`isJwtExpired`), `services/apiClient.ts`, Profile tab (`ProfileScreen.tsx`). Keep the backend running on port 3000 when refreshing a dev token.
-
-### Mission cooldown (development)
-
-Optional in `backend/.env` (see `backend/.env.example`):
-
-```env
-MISSION_RISK_COOLDOWN_MINUTES=2
-```
-
-Suppresses **new** risky-content missions while a **pending** risky mission exists **or** a risky mission was **escaped/abandoned (failed)** within `MISSION_RISK_COOLDOWN_MINUTES`. In both cases a further risky capture **re-surfaces the same mission** (`reSurfaced: true`, failed ones are re-opened to pending) rather than spawning a brand-new mission — so abandoning does not immediately create a *different* mission. `pending_approval` missions (waiting for parent) do **not** count toward the max-3 pending limit and do **not** block a new risky mission. On the client, a **10s post-mission grace** stops the immediate `resumeCapture` frame from stacking a second overlay.
-
-For demos, complete or expire leftover `pending` missions if you hit `pending_limit_reached` with no overlay. Restart the backend after pulling mission-helper changes.
-
-### Cooldowns & timers (reference)
-
-| Timer | Typical value | What it controls |
-|-------|---------------|------------------|
-| **Risky mission cooldown** | While a **pending** risky mission exists | Blocks creating a *new* risky-content mission; risk events are still stored; existing pending is **re-surfaced** |
-| **Pending risky mission** | Until completed / expired | Also blocks new risky missions (`cooldown_active`); overlay should re-show |
-| **Pending mission limit** | Max **3** status=`pending` | `pending_approval` (awaiting parent) does **not** count; on limit, re-surface an existing pending mission |
-| **New-mission overlay debounce** | **90 s** | Same mission id not re-shown within 90s |
-| **Re-surface overlay debounce** | **60 s** | Minimum gap between re-surfaced overlays for the same mission |
-| **Startup grace** | **8 s** | After monitoring starts, suppress re-surfaced overlays |
-| **Dismissed re-surface block** | **2 min** | After the child dismisses a re-surfaced overlay |
-| **Capture debounce** | **5 s** | Minimum gap between captures (do not lower casually — OCR load) |
-| **App-switch follow-up** | **5 s** (skip if capture &lt; **2 s** ago) | Extra capture after leaving SafeGuard |
-| **Post-mission present grace** | **10 s** | After a mission overlay ends, suppress presenting another mission (risk still posted) — stops back-to-back overlays |
-| **Native tick** | **5 s** (`NATIVE_TICK_INTERVAL_MS`) | Single native clock; JS subsamples it to the effective periodic interval |
-| **Periodic capture** | **10 / 15 / 20 s** by risk (+ app category), subsampled from the 5 s tick | How often the screen is re-scanned while staying in an app |
-| **OCR lock takeover** | **8 s** | Newest frame takes over if OCR is stuck |
-| **Foreground lookup timeout / stuck** | **2.5 s** wall-clock | Abandon wedged UsageStats single-flight; skip await in background (JS timers may be frozen) |
-| **Vision / processing watchdog** | **~25 s** | In-frame; force-release hung processing. Foreground only (frozen when backgrounded) |
-| **Tick-liveness backstop** | **60 s** (`OCR_LOCK_LIVENESS_MS`) | Native-tick recovery for a wedged frame; survives backgrounding **only while screen is on** |
-| **Per-phase deadline (D1)** | `foreground_lookup` **10 s**, `api_post` **20 s**, `vision` none | Native-tick recovery, per phase; `tick-phase-timeout:<phase>` |
-| **Post-mission foreground grace** | **120 s** | Reuse Chrome/Messenger package if UsageStats is briefly unknown |
-| **Mission abandon grace** | **3 s** | Leaving MissionScreen in the first 3s does not count as escape |
-| **Dev JWT lifetime** | **7 days** | `/api/dev/child-token`; auto-refresh on expiry / 401 / Profile logout |
-
-**Reading Metro logs:**
-- `Risky capture — no mission overlay` + `cooldown_active` → detection worked; a **pending** risky mission already exists. The API should still return `newMission` with `reSurfaced: true` so the overlay reappears (check for `New mission from screen event`).
-- `Risky capture — no mission overlay` + `pending_limit_reached` → ≥3 unfinished `pending` missions. Waiting-for-parent (`pending_approval`) no longer counts toward this limit. If a pending mission exists, it should be re-surfaced; otherwise complete or expire old pending missions.
-- `New mission from screen event` → a mission was created or the overlay path was taken.
-- `Mission presentation skipped — post-mission grace` → a mission just ended; the immediate resume frame is not allowed to stack another overlay for 10s (risk event still stored).
-- `Foreground lookup wedged — skipping await` → UsageStats hung while JS timers were frozen; frame continues with `unknown` attribution and OCR still runs.
-- Repeated `OCR lock takeover` with **no** OCR/risk lines after `Frame received` → pipeline was stuck on a wedged foreground lookup (fixed by self-heal above; reload the app after updating).
-- `Processing lock force-released after hung frame` with `cause: 'tick-liveness'` (`elapsed ≈ 60000`) or `cause: 'tick-phase-timeout:<phase>'` → a frame wedged and the native-tick backstop recovered it; monitoring continues. `elapsed` far above 60 s (e.g. ~195000) means the screen was off and JS was frozen until it woke.
-- `frame.phase {from, to, appState, prevPhaseMs}` → per-phase timing for each capture; `prevPhaseMs` on `vision → api_post` with `appState ≠ 'active'` is the data needed to eventually set a `vision` phase deadline.
-
-### API Base URL for Physical Devices
-
-The emulator uses `http://10.0.2.2:3000` automatically. On a **physical device**, set your PC's Wi-Fi IPv4 in `MobileApp/src/config/apiConfig.ts`:
-
-```typescript
-export const DEV_LAN_HOST = '192.168.x.x';  // from ipconfig (Windows) or ifconfig
-```
-
-`getApiBaseUrl()` picks `10.0.2.2` on emulators and `DEV_LAN_HOST` on real hardware.
-
-### Firewall & Network
-
-- Allow inbound **TCP 3000** in Windows Firewall.
-- Phone and PC must be on the **same Wi-Fi**.
-- Test from the phone browser: `http://<YOUR_IP>:3000/api/health`
-
----
-
-## Running the Application
-
-| Terminal | Directory | Command | Purpose |
-|----------|-----------|---------|---------|
-| 1 | `backend` | `npm run dev` | API on port 3000 |
-| 2 | `MobileApp` | `npm start` | Metro bundler |
-| 3 | `MobileApp` | `npm run android` | Install on device |
-
-Grant **MediaProjection** when prompted. Screen monitoring starts via `ScreenMonitor`. Usage tracking now runs via `useRealForegroundTracker` (app-root), polling foreground packages every **5s** while monitoring is active, and batching `POST /api/usage` every **60s**.
-
-Run scoring unit tests:
-
-```bash
-cd backend && npm test
-```
-
----
-
-## API Endpoints (Sprint 1)
-
-### `GET /api/health`
-
-Public health check.
-
-### `GET /api/dev/child-token` (development)
-
-Returns a signed JWT for the seeded test child (`expiresIn: '7d'`). The mobile app stores it in AsyncStorage and refreshes it when expired, on **401**, or when the user taps **Log out / refresh JWT** on Profile.
-
-### `POST /api/screen-events` (child)
-
-**Body example:**
-
-```json
-{
-  "timestamp": "2026-05-17T18:30:00.000Z",
-  "appPackage": "com.instagram.android",
-  "extractedTextPreview": "Sample OCR text from screen...",
-  "riskFlag": true,
-  "riskScore": 72,
-  "imageRiskScore": 81,
-  "combinedRiskScore": 78,
-  "imageClassificationDetails": {
-    "source": "mlkit",
-    "violenceScore": 0.12,
-    "imageRiskScore": 81
-  },
-  "category": "violent"
-}
-```
-
-`imageClassificationDetails` is a fixed schema-bounded object — named fields only (classifier scores + model-label vocabulary), every string length-capped, unknown keys stripped and logged server-side (`backend/src/validators/screenEvents.validator.ts`). `mockHint` is accepted for backward compatibility but not stored.
-
-**Response:** `201 Created` with stored event (includes Sprint 3 vision fields when provided).
-
-### `GET /api/screen-events/:childId` (parent)
-
-Returns screen events for the given child (JWT must match parent/child roles as implemented in middleware).
-
-## API Endpoints (Sprint 2)
-
-### `POST /api/usage` (child)
-
-Batch insert foreground usage sessions.
-
-```json
-{
-  "sessions": [
-    {
-      "startTime": "2026-05-17T10:00:00.000Z",
-      "endTime": "2026-05-17T10:15:00.000Z",
-      "appPackage": "com.android.chrome",
-      "appCategory": "browser_social"
-    }
-  ]
-}
-```
-
-**Response:** `{ "count": 1 }`
-
-### `GET /api/usage/:childId?date=YYYY-MM-DD` (parent)
-
-Returns raw sessions for a calendar day (defaults to today).
-
-### `GET /api/scores/:childId?date=YYYY-MM-DD` (parent)
-
-Returns addiction and well-being scores for a date. Without `date`, returns the latest stored score. Response also includes `totalPoints` and `level` (`floor(totalPoints / 500) + 1`).
-
-**Addiction score note:** the stored `addictionScore` includes a weekly **exposure penalty** (up to +20) from risky `screen_events` in the last 7 days (`2` points per event, capped at `20`). See [docs/scoring_formulas.md](docs/scoring_formulas.md).
-
-### `GET /api/scores/:childId/trend?days=7` (parent)
-
-Returns daily scores for the last N days (1–90).
-
-### Scoring formulas
-
-See [docs/scoring_formulas.md](docs/scoring_formulas.md) for component weights, examples, and cron behaviour.
-
-**Verify usage & scores in PostgreSQL:**
+Switch monitoring on in the Monitor tab and grant MediaProjection. Open an app with visible text; within ~20 s (at once on an app switch) the backend logs `POST /api/screen-events`. Usage sessions are polled every 5 s and posted every 60 s. Check the data:
 
 ```sql
+SELECT timestamp, LEFT(extracted_text_preview, 80) AS preview, risk_flag, category
+FROM screen_events ORDER BY timestamp DESC LIMIT 10;
+
 SELECT start_time, end_time, app_package, app_category
-FROM usage_sessions
-ORDER BY start_time DESC
-LIMIT 10;
+FROM usage_sessions ORDER BY start_time DESC LIMIT 10;
 
 SELECT score_date, addiction_score, wellbeing_score
-FROM daily_scores
-ORDER BY score_date DESC;
+FROM daily_scores ORDER BY score_date DESC;
 ```
 
----
-
-## Testing the Screen Monitoring Pipeline
-
-1. Run backend and mobile app; grant MediaProjection.
-2. Open an app with visible text (Chrome, Notes, social apps).
-3. Wait ~30 seconds.
-4. Backend logs should show successful `POST /api/screen-events`.
-
-**Verify in PostgreSQL:**
-
-```sql
-SELECT timestamp,
-       LEFT(extracted_text_preview, 80) AS preview,
-       risk_flag,
-       category
-FROM screen_events
-ORDER BY timestamp DESC
-LIMIT 10;
-```
-
-**Common issues:**
-
-| Symptom | Fix |
-|---------|-----|
-| Network error on device | Update `DEV_LAN_HOST`, check firewall & same Wi-Fi |
-| MediaProjection denied | Ensure foreground service in manifest; do not duplicate `onActivityResult` in `MainActivity` |
-| OCR empty | Use screens with larger, clear text |
-| HTTP 400 on preview | Preview must be ≤500 characters (no trailing ellipsis beyond limit) |
-| Gradle / OneDrive locks | Clean `.gradle`, avoid syncing `android/build` via OneDrive |
-| Frames emit but no OCR / endless `OCR lock takeover` | Reloaded JS with foreground-lookup self-heal; if still stuck, toggle monitoring off/on |
-| Risk detected but no mission (`cooldown_active` / `pending_limit_reached`) | Expected when a pending mission already exists — overlay should **re-surface**. If it does not, restart the backend (mission helper fix). Clear old pending missions in DB or complete them if ≥3 unfinished `pending` rows |
-
-See also `MobileApp/TESTING.md` if present in the repo.
+See also `MobileApp/TESTING.md`.
 
 ---
 
-## Privacy & Security
+## Running the tests
 
-- **No screenshots leave the device.** JPEG is temporary; only text metadata (≤500-char preview, numeric scores, enum category, app id, and a schema-bounded classifier-details object) is transmitted.
-- **JWT** secures API routes; use strong `JWT_SECRET` in production.
-- **Minimal permissions:** MediaProjection, foreground service, Internet, **Display over other apps** (mission overlay on Android only).
-- **Explicit consent** required before monitoring starts (MediaProjection dialog).
-- Designed with **GDPR / COPPA** principles: data minimisation, on-device processing.
+| Suite | Command | Result on current `main` |
+|-------|---------|--------------------------|
+| Mobile Jest | `cd MobileApp; npm test` | 517 passed / 37 suites |
+| Backend Jest | `cd backend; npm test` | 247 passed / 24 suites |
+| JVM (native, Android-free) | `cd MobileApp/android; .\gradlew.bat app:testDebugUnitTest --project-cache-dir C:/gradlecache/mobileapp` | 155 passed (11 test classes) |
+| Type check | `cd MobileApp; npx tsc --noEmit` | exactly 2 known errors (deferred on purpose) |
 
----
-
-## Sprint Status
-
-| Sprint | Dates | Status | Summary |
-|--------|-------|--------|---------|
-| **1** | 18 – 31 May 2026 | Complete | **OCR + JWT backend** — MediaProjection capture, on-device ML Kit OCR, keyword filter, `POST /api/screen-events`, JWT auth, `screen_events` storage |
-| **2** | 1 – 14 June 2026 | Complete | **Usage-based scoring + cron** — real foreground app sessions (`POST /api/usage`, JS poll 5s while monitoring), addiction & well-being scoring engine, `node-cron` daily aggregation, score & trend APIs |
-| **3** | 15 – 28 June 2026 | Complete | **Vision model + combined risk** — ML Kit image labeling + nsfwjs-style proxy on device, `combinedRiskScore = OCR×0.3 + vision×0.7`, extended `screen_events` fields |
-| **3.5** | — | Complete | **Debug & foreground** — `POST /api/debug/classify` (backend nsfwjs + Tesseract OCR), `demo_dashboard.html`, `ForegroundAppModule` (UsageStats), shared `riskMapping.ts` (mobile + backend), `app_label` migration |
-| **3.6** | — | Complete | **Accuracy improvements** — expanded ML Kit mapping (weapons, drugs, gore, adult, hentai proxy), `enforceCategoryConsistency`, explicit OCR boosts & overrides, `nsfwClassifier` proxy (no tfjs on device) |
-| **3.7** | — | Complete | **Adaptive capture** — immediate capture on app switch, follow-up after 5s, risk-based dynamic intervals (10s / 15s / 20s from rolling average of last 3 scores), 5s debounce |
-| **3.8** | — | Complete | **NSFW model training** — fine-tune EfficientNetV2B0 on the NSFW Data Scraper dataset (5 classes), export quantized `.tflite` (training pipeline archived locally; repo ships Yahoo Open NSFW from Sprint 3.9) |
-| **3.9** | — | Complete | **On-device NSFW TFLite** — Yahoo Open NSFW `nsfw.tflite` via native `NsfwTflite` module (RN 0.74–compatible), replaces ML Kit heuristic proxy for adult score |
-| **3.10** | — | Complete | **Multilingual OCR (FR / AR / Derja)** — French + Arabic + Tunisian Derja Arabizi keyword lists, `normalizeArabizi.ts` (digit-letter → quasi-Arabic), `mixedScriptOcr.ts` (ML Kit primary + graceful Tesseract `ara+fra+eng` fallback), normalized-text channel in `keywordFilter` |
-| **3.11** | — | Complete | **Foreground app accuracy** — UsageEvents window 15s→120s, UsageStats recency filter (5s), capture-time 3× retry (200ms), 15s cache TTL, skip System UI / launcher; fixes Instagram sticking when switching to Messenger |
-| **3.12** | — | Complete | **OCR noise reduction** — `cleanOcrText` strips UI timestamps/counts/phrases; stricter Arabizi gating (≥2 transformation digits, UI number exclusion); documented ML Kit Arabic limitation (no Tesseract on RN 0.74) |
-| **3.13** | — | Complete | **Debug Arabic OCR** — `POST /api/debug/arabic-ocr` (server Tesseract `ara`); backend keyword lists synced with mobile; Arabic script demo path added for supervisor validation |
-| **3.14** | — | Complete | **On-device Arabic OCR (Android)** — integrated `@devinikhiya/react-native-tesseractocr` with lazy initialization, sequential ML Kit→Tesseract fallback, no OCR concurrency, and `ara.traineddata` assets |
-| **4** | 29 June – 12 July 2026 | Complete | **Missions & gamification (backend)** — mission generation from risk/scores, points, badges, parent rewards, cognitive remediation validation |
-| **4.5** | — | Complete | **Smart mission generation** — adaptive risk threshold, cumulative burst detection, category-specific templates, escalation points, 15-min cooldown |
-| **5** | — | Complete | **Gamification frontend** — React Navigation UI, parent approval / reject / bonus, escape penalty, `SYSTEM_ALERT_WINDOW` mission overlay + notification fallback, dashboard at `/demo.html`, `fetchWithAuth` POST fix |
-| **5.6** | — | Complete | **Exposure penalty + player levels** — weekly risky-event count adds up to +20 to daily addiction score; `GET /api/scores/:childId` returns `level`; Profile shows level from points |
-| **5.7** | — | Complete | **Parent dashboard enhancement** — Monitoring vs Parent tabs; child profile, latest scores/level/points, earned badges, mission history (completed+expired, last 20 with dates), claimed rewards history, toast feedback on actions |
-| **5.8** | — | Complete | **Dynamic wellbeing proxies + interests** — physical activity / bedtime / family interaction from missions & usage; age-based screen cap; `children.interests` JSONB; interest tie-breaker in mission selection; parent dashboard interests editor |
-| **6** | 13 – 31 July 2026 | Planned | Hardening, tests, final demo & report |
-| **6.1** | — | Complete | **Capture-pipeline hardening (A3c → D3)** — single native 5 s tick + JS subsample (retires the dual loop), capture coordinator with priority coalescing + owed-force debt, native perceptual-hash frame-skip gate, accessibility-driven app-switch / keyboard-suppression / scroll-settle, MediaProjection revoke + stale-token recovery, and layered wedged-frame recovery: 60 s tick-liveness backstop (A3c-2c), D1 per-phase deadlines (`foreground_lookup` 10 s / `api_post` 20 s), D3 generation-guarded `finally`. 330 mobile unit tests. |
-| **Phase B** | 15 – 27 Sept 2026 | ✅ Done | **Adult-site blocking (Chrome only)** — an accessibility-service address-bar watcher matches a known-domain list (StevenBlack, ~76.8k entries) in about 130 ms, and the app **learns** new adult domains on-device from what the vision model sees on screen (raw NSFW ≥ 0.7), so a repeat visit is blocked instantly. A listed domain gets Back + a full-screen block overlay; a first detection or an OCR-only false positive gets Back only (no list write). On the block screen's OK, Chrome is relaunched onto a fresh blank tab (`OverlayWindowHelper.BlockDismissGate`; the launch-before-teardown ordering is load-bearing for the `BAL_ALLOW_NON_APP_VISIBLE_WINDOW` exemption). Parent side: `blocked_domains` / `browser_block_incidents` tables, a dev-only unblock endpoint, read-only dashboard panels, and a device-side offline queue with backfill and reconciliation. **Known limits:** Chrome only (other browsers, VPN and private DNS bypass it); thumbnail-grid landing pages score low on raw vision (measured 0.271), so learning a new domain typically needs a tap into a full-screen item. **Open finding:** whether the enforcement's Back press moves the page depends on how fast it fires, not on tab history — see `CLAUDE.md`. Full detail, test counts and further limits (incognito first-visit, drawn/animated content) are in `CLAUDE.md`'s Phase B section, not duplicated here. |
+`scripts/run-all-tests.ps1` runs only the two Jest suites; run the JVM tests separately. Smoke scripts against a running API (`npm run smoke:missions`, `smoke:sprint58`, `test:sprint59`) and the manual device plans are in [docs/testing_strategy.md](docs/testing_strategy.md).
 
 ---
 
-## Sprint 3 – Image classification (on-device)
+## Troubleshooting
 
-After each screenshot, **OCR** and **image classification** run in parallel:
+The full table (network, MediaProjection, missions not showing, Windows/OneDrive build, Accessibility service) and a guide to the Metro log lines are in [docs/deployment.md §11](docs/deployment.md#11-troubleshooting). The two most common:
 
-| Step | Module | Output |
-|------|--------|--------|
-| 1 | **Multilingual OCR** (`mixedScriptOcr.ts`) | ML Kit text + Arabizi-normalized text → multilingual keyword risk (EN / FR / AR / Derja) |
-| 2 | **TFLite NSFW** (`nsfw.tflite`) + ML Kit labels | `imageRiskScore`, `adultScore`, `tfliteOutputs` |
-| 3 | `riskCombination.ts` | `combinedRiskScore = OCR×0.3 + image×0.7` |
-
-**Pipeline order (RN 0.74.5):** native `NsfwTflite` (Yahoo Open NSFW, 224×224) + ML Kit Image Labeling for violence/gore/educational cues. Model: `MobileApp/android/app/src/main/assets/models/nsfw.tflite`. Rebuild required after model changes (`npm run android`). In `__DEV__`, use the **NSFW TFLite debug** panel to re-classify the last capture.
-
-**New API fields** on `POST /api/screen-events`: `imageRiskScore`, `imageClassificationDetails`, `combinedRiskScore`.
-
-**Replace mock with a real model:** see [MobileApp/assets/models/README.md](MobileApp/assets/models/README.md).
-
-**Rebuild required** after adding native deps:
-
-```bash
-cd MobileApp
-npm install
-npm run android
-```
-
-**Verify vision fields:**
-
-```sql
-SELECT timestamp, image_risk_score, combined_risk_score, category,
-       image_classification_json->>'source' AS classifier
-FROM screen_events
-ORDER BY timestamp DESC
-LIMIT 10;
-```
-
-**Debug upload vs device:** `POST /api/debug/classify` and `demo_dashboard.html` use **backend nsfwjs + Tesseract** — not the on-device TFLite pipeline. Use `screen_events` / Metro `[NSFW] TFLite` logs for real monitoring scores.
+- **Network error on the device** — wrong `DEV_LAN_HOST`, missing `adb reverse`, or firewall.
+- **Adult site not blocked / Accessibility card not Active** — the OS stopped the service; re-enable it in Settings → Accessibility.
 
 ---
 
-## Multilingual OCR (Sprint 3.10 – 3.14)
+## Known limitations / future work
 
-The on-device OCR path now covers **English + French + Arabic + Tunisian Derja Arabizi** without sending screenshots off-device.
+**Limits of the current system**
 
-### On-device (production child app)
+- Thumbnail-grid pages score low because the whole screen is shrunk to 224×224 (observed raw NSFW 0.007–0.505, typically 0.02–0.27, against 0.73–0.98 for a full-screen explicit image); drawn content scores about 0. There is no labelled test set, so no accuracy figure is claimed.
+- Site blocking works in Chrome only; other browsers, VPNs and private DNS bypass it. Incognito frames are black, so a first visit there cannot be detected (listed domains still block). For under a second after the service starts, while the lists load, nothing is blocked.
+- The Accessibility service is enabled by hand and the OS can stop it.
+- When the phone's screen is off, Android freezes the app's JS thread, so a stuck capture is recovered only when the screen wakes.
+- Quiz answers are sent to the device so the overlay can show the correct option at once; the server re-grades every submission, so the score can't be forged from the client.
+- Game difficulty is stored on the device (AsyncStorage), not on the server.
+- An escape penalty applies on Home / app switch during a mission, but force-closing the app does not trigger one.
+- Well-being inputs are proxies (missions, usage), and real-world missions are honour-based.
+- Authentication uses development-minted tokens; there is no sign-in or registration.
+- `tsc --noEmit` reports 2 known errors in `useScreenshotCapture.ts`, deferred on purpose.
 
-| Layer | File | Responsibility |
-|-------|------|----------------|
-| Primary OCR | `MobileApp/src/services/mixedScriptOcr.ts` | ML Kit `TextRecognition.recognize` (fast path, FR/EN/Arabizi) |
-| UI noise filter | `MobileApp/src/utils/cleanOcrText.ts` | Strips timestamps, like counts (`308K`), social UI strings |
-| Script detection | `MobileApp/src/utils/normalizeArabizi.ts` | `containsArabicScript` + stricter Arabizi gating (Sprint 3.12) |
-| Arabizi normalization | `normalizeArabizi(text)` | Digit/digraph mapping for Derja keyword matching |
-| Arabic fallback (Android) | `MobileApp/src/services/mobileArabicOcr.ts` | `@devinikhiya/react-native-tesseractocr` + `ara.traineddata` (lazy init, sequential fallback only when Arabic is detected) |
-| Multilingual keyword filter | `MobileApp/src/utils/keywordFilter.ts` | EN / FR / AR / Derja lists; `keywordFilter(text, normalizedText?)` |
+**Future work**
 
-**Android OCR flow:** ML Kit runs first on every frame. Tesseract (`ara`) runs **after** ML Kit only when `arabicOcrTrigger.ts` detects Arabic script or garbled Latin from Arabic pages — **not** on English-dominant screens (e.g. Chrome on adult sites). If Tesseract hallucinates Arabic over substantial Latin ML Kit text, the pipeline keeps ML Kit output for keyword matching. Messaging apps skip Tesseract unless ML Kit already saw Arabic Unicode (Latin Derja stays on ML Kit + normalisation).
-
-**Platform note:** the child app targets **Android only**; on-device Arabic Tesseract runs on Android via `@devinikhiya/react-native-tesseractocr`.
-
-### Debug only (server — demo / supervisor)
-
-| Endpoint | Stack | Purpose |
-|----------|-------|---------|
-| `POST /api/debug/classify` | nsfwjs + Tesseract `eng` | Vision + English OCR combined risk |
-| `POST /api/debug/arabic-ocr` | Tesseract `ara` + synced keyword filter | **Arabic Unicode extraction** for demo; images leave device only in this debug tool |
-
-Use **Arabic OCR Debug Tool** in `demo_dashboard.html` to upload a screenshot with Arabic text and verify `سكس` / `قحبة` trigger `category: adult`. Production monitoring still uses on-device pipeline only.
-
-**Arabic OCR accuracy:** Debug endpoint uses Arabic-only Tesseract (`ara`) with 1600px upscale and PSM block/auto. On-device Android fallback also uses Tesseract and may still produce spacing/diacritic noise on low-res social screenshots; keyword filtering remains robust against short OCR artifacts.
-
-**Tests:** Mobile — `normalizeArabizi.test.ts`, `cleanOcrText.test.ts`, `keywordFilterMultilingual.test.ts`. Backend — `arabicOcr.test.ts`, `debugPipeline.test.ts`.
+- Tiled vision inference, so thumbnail grids are scored piece by piece.
+- Parent notifications (push, email or SMS) beyond the open dashboard.
+- Limit the on-device preview log to debug builds.
+- Server-side game stats (`child_game_stats`) so difficulty follows the child across devices; a server-side inactivity timeout for abandoned missions.
+- Multi-child parent view, mission history charts, a quiz admin form, real authentication.
 
 ---
 
-**Current milestone:** Sprint **5.8** — dynamic wellbeing proxies (missions + usage), child interests API, interest-based mission tie-breaker; Sprint 5.7 parent dashboard tabs.
-
----
-
-## Missions & Gamification (Sprint 4–5)
-
-When risk or usage scores cross thresholds, the backend generates age-adapted missions (real-world, quiz, minigame, cognitive). Completing missions awards points; badges unlock automatically; parents define redeemable rewards.
-
-**Note:** All gamification `child_id` values reference `children.id` (same as JWT `childId`), not `users.id`.
-
-### Mission generation triggers
-
-| Trigger | Condition | Source |
-|---------|-----------|--------|
-| Risky content (single) | `combinedRiskScore > adaptiveThreshold` (7-day avg + 10, clamped 50–80) | `POST /api/screen-events` → `generateMissionFromRisk` |
-| Risky content (cumulative) | Sum of last **5** events in 30 min **> 300** (min 3 events) | Same path — allows moderate singles to trigger via burst |
-| Low wellbeing | `wellbeingScore < 40` | Daily cron (`dailyScoreJob.ts`) |
-| High addiction | `addictionScore > 70` | Daily cron (`dailyScoreJob.ts`) |
-| Mobile suggest | Client calls `POST /api/missions/suggest` | Same smart rules as risky content (score defaults to 75) |
-
-**Screen events route:** `POST /api/screen-events` calls `generateMissionFromRisk` for **every** event where `combinedRiskScore != null` (not only scores above a fixed 70), so cumulative burst detection can fire when individual scores are below the adaptive threshold.
-
-**Skip reasons:** `below_risk_threshold`, `cooldown_active`, `pending_limit_reached`.
-
-Rules: max **3 pending** missions per child; missions expire after **24 hours**; cooldown between risky-content missions is `MISSION_RISK_COOLDOWN_MINUTES` (dev **2 min**, prod **15 min**); age from `children.birth_year` adapts template difficulty.
-
-### Smart mission generation (Sprint 4.5)
-
-| Feature | Behaviour |
-|---------|-----------|
-| **Adaptive threshold** | `AVG(combined_risk_score)` over 7 days + 10, clamped 50–80; defaults to 50 for new children |
-| **Cumulative risk** | Last 5 non-null scores in 30 min; trigger if sum > 300 and count ≥ 3 |
-| **Category mapping** | `adult` → safety quiz / games / digital detox; `violent`/`gore` → **media & violence quiz** / conflict quiz / kindness / games; `toxic` → kind words / empathy quiz; `dangerous`/`dangerous_challenge` → safety talk / parent chat; unknown → safety quiz / tic-tac-toe |
-| **Escalation** | After every 3 `risky_content` missions in 24 h, +30% points per level (max +60% at level 2); applied after template selection |
-| **Cooldown** | No new risky mission within 15 min of the last `risky_content` mission |
-
-Addiction/wellbeing daily-score triggers still take priority inside `pickMissionTemplate` over category mapping.
-
-**Migration:** `009_add_screen_events_child_created_idx.sql` — index on `screen_events (child_id, created_at DESC)`.
-
-### Mission types & cognitive validation
-
-| Type | Examples | Completion payload |
-|------|----------|-------------------|
-| `real_world` | Jumping jacks, family board game, screen-free break | `{ confirmed: true }` |
-| `quiz` | Online safety / conflict / empathy quiz | `{ answers: ['A','B','A'] }` — pass if ≥2/3 correct |
-| `minigame` | Tic-tac-toe (AI), mini sudoku (4×4) | `{ won: true }` or `{ completed: true }` |
-| `cognitive` | N-back, reaction time, Tower of Hanoi | `{ exerciseScore }`, `{ reactionTimeMs }`, `{ moves }` |
-
-Cognitive scoring: N-back proportional to `%` correct; reaction ≤300ms full points; Hanoi optimal (7 moves for 3 disks) = base + 10 bonus.
-
-**Playable mini-games (Sprint 5):** each mission now renders a real interactive component in `MobileApp/src/screens/missions/` instead of a demo button:
-
-| Game | Component | Notes |
-|------|-----------|-------|
-| Tic-Tac-Toe | `TicTacToeGame.tsx` | Child = X; AI = O with `easy` (random), `medium` (win/block + center), `hard` (minimax, unbeatable) |
-| Mini Sudoku 4×4 | `SudokuGame.tsx` | Pre-validated solutions; clue count by difficulty (easy 10 / medium 8 / hard 6) |
-| N-back | `NBackGame.tsx` | 20 trials, 1.8s/step; level from `metadata.level`; accuracy 0–100; level rises after ≥80% |
-| Reaction time | `ReactionGame.tsx` | Grey→green after random delay; "too soon" guard; average of 3 attempts |
-| Tower of Hanoi | `TowerOfHanoiGame.tsx` | Tap-to-select pegs with legality checks; bonus for optimal 7 moves |
-| Quiz | `QuizScreen.tsx` | One question at a time; questions from `metadata.questions` or built-in bank (`quizBank.ts`); selected option letters sent as `answers` |
-
-Pure game logic lives in `MobileApp/src/missions/games/gameLogic.ts` (unit-tested in `__tests__/gameLogic.test.ts`).
-
-### Backend API (JWT required except `/health`, `/dev/*`, `/debug/*`)
-
-| Method | Path | Role | Purpose |
-|--------|------|------|---------|
-| POST | `/api/missions/suggest` | Child | Mobile compat — create mission from category |
-| POST | `/api/missions/generate` | Dev | Manual trigger (non-production) |
-| GET | `/api/missions/child/:childId` | Child / Parent | List `pending`, `pendingApproval`, `completed`, `expired`, `failed` |
-| GET | `/api/missions/child/:childId/points` | Child / Parent | Total points |
-| POST | `/api/missions/:missionId/complete` | Child | Complete mission (`real_world` → `pending_approval`) |
-| POST | `/api/missions/:missionId/approve` | Parent | Approve real-world mission, award points |
-| POST | `/api/missions/:missionId/reject` | Parent | Reject pending approval → `expired` |
-| POST | `/api/missions/:missionId/abandon` | Child | Escape penalty (−10 pts, `failed`) |
-| POST | `/api/bonus/child/:childId` | Parent | Award bonus points |
-| GET | `/api/custom-missions` | Parent | List custom real-world missions |
-| POST | `/api/custom-missions` | Parent | Create custom mission |
-| PUT | `/api/custom-missions/:id` | Parent | Update custom mission |
-| DELETE | `/api/custom-missions/:id` | Parent | Delete custom mission |
-| GET | `/api/rewards` | Parent / Child | List rewards (child sees unclaimed only) |
-| POST | `/api/rewards` | Parent | Create reward |
-| PUT | `/api/rewards/:rewardId` | Parent | Update reward |
-| DELETE | `/api/rewards/:rewardId` | Parent | Delete reward |
-| POST | `/api/rewards/:rewardId/claim` | Child | Spend points to claim |
-| GET | `/api/badges` | Any | All badges; `?childId=` adds earned status |
-| GET | `/api/badges/child/:childId` | Child / Parent | Earned badges |
-| GET | `/api/child/profile/:childId` | Parent | Read child display name and `birth_year` |
-| PUT | `/api/child/profile` | Parent | Update `birth_year` (re-checks age badges); parent must own child |
-| GET | `/api/child/interests/:childId` | Parent | Read child interests (`sports`, `art`, `reading`, `family`, `brain`) |
-| PUT | `/api/child/interests` | Parent | Update child interests (parent must own child) |
-
-**Migrations:** `007`–`015` — run `npm run db:migrate` from `backend/` (`010` parent approval/escape; `011` quiz bank; `012` custom missions; `014` child interests; `015` badge cleanup).
-
-**Screen events:** `POST /api/screen-events` response includes `newMission` when a mission is created or **re-surfaced** during cooldown (`missionGeneration` explains `cooldown_active`, etc.). Mobile calls `presentMissionFromCapture()` → native overlay or notification + `MissionScreen`.
-
-**Tests:** `missionGenerator.test.ts`, `missionHelpers.test.ts`, `gamificationService.test.ts`, `missionCompletion.test.ts`, `missionsApproval.test.ts`, `resurface.test.ts`, `quizService.test.ts`, `customMissionService.test.ts`. Mobile game logic: `MobileApp/__tests__/gameLogic.test.ts`.
-
-### Gamification frontend (Sprint 5)
-
-**Mobile app** (`MobileApp/`): React Navigation bottom tabs — Monitor, Missions, Rewards, Badges, Profile. Blocking `MissionScreen` on high-risk capture or when opening an active mission.
-
-| Feature | Behaviour |
-|---------|-----------|
-| **Parent approval** | Real-world complete → `pending_approval`; parent approves via dashboard |
-| **Escape penalty** | Home / app switch during active mission → `POST .../abandon`, −10 points |
-| **Bonus points** | Parent awards via dashboard → `POST /api/bonus/child/:childId` |
-| **Auto-mission** | `newMission` in screen-event response → **SYSTEM_ALERT_WINDOW overlay** on Android (blocks Instagram/other apps); fallback: notification + `MissionScreen` |
-| **Smart difficulty** | Age baseline (`<10` easy, `≥13` hard) + on-device performance store (`gameStats.ts`); strong runs escalate one step; N-back level persists across missions |
-| **Points refresh** | Pull on focus / pull-to-refresh; optional 60s poll on Missions & Profile (no push) |
-| **Log out / JWT refresh** | Profile → **Log out / refresh JWT** clears AsyncStorage and re-fetches a dev child token; also runs automatically on expired `exp` or API **401** |
-
-**Parent dashboard:** [`http://localhost:3000/demo.html`](http://localhost:3000/demo.html) — served directly from the repo-root [`demo_dashboard.html`](demo_dashboard.html) (no copy, no sync step; ALL_IS_FIXED #5). Edit the file and reload.
-
-**For browser notifications, use the backend URL** — `file://` may block notifications.
-
-Two tabs:
-
-| Tab | Contents |
-|-----|----------|
-| **Monitoring** | Vision model debug, Arabic OCR debug, summary cards, 7-day scores chart, recent screen events, API activity log |
-| **Parent Dashboard** | Child profile from API (`GET/PUT /api/child/profile` — editable birth year), **child interests editor** (`GET/PUT /api/child/interests`), latest addiction/wellbeing scores, total points & level (`GET /api/scores/:childId`), pending approvals (approve/reject with toasts), mission history (completed + expired, last 20 with dates), earned badges (`GET /api/badges/child/:childId`), active rewards + claimed history, bonus points, escape log, custom missions |
-
-All actions use `fetchWithAuth(path, { method, body })` with the parent JWT from `GET /api/dev/parent-token`.
-
-**Mission overlay (Android):** grant **Settings → Display over other apps** for the child app. Native `OverlayService` shows a full-screen card on Chrome/Instagram/etc.; see [`MobileApp/android/NATIVE_SETUP.md`](MobileApp/android/NATIVE_SETUP.md). **Rebuild required** after native overlay changes (`npm run android`).
-
-**Limitations (Sprint 5):**
-
-- Quiz/cognitive games are **fully playable** with real scoring. The quiz question bank (`quizBank.ts`) is curated for the existing categories; production should expand it and/or store questions in mission metadata.
-- **Smart difficulty** is stored **on-device** (`AsyncStorage`) rather than a server `child_game_stats` table — adaptive per device; server-side persistence is future work.
-- **Escape penalty** applies when `AppState` goes to background (Home) **and** when the child quits/leaves `MissionScreen`. **Force-closing the app does not trigger a penalty.**
-- **Future:** server-side inactivity timeout to auto-fail abandoned missions.
-- **No FCM** — parent uses dashboard browser notifications (30s poll). FCM wiring is documented as optional; the mobile app already uses a native high-priority notification fallback for missions, so no extra RN push package is required.
-- **Overlay permission** — child must grant **Display over other apps** (`Settings.canDrawOverlays`) for auto-block on third-party apps. Without it, a high-priority notification opens `MissionScreen` when the user returns to SafeGuard.
-- **Risky-mission cooldown** — after a risky-content mission is created, new ones are suppressed for `MISSION_RISK_COOLDOWN_MINUTES` (dev default **2 min**, prod **15 min**). During cooldown, a further risky capture **re-surfaces the existing pending mission**: its `expires_at` is extended by **24 h** and its points increase by **+5** (capped at **+50%** of the base value) so it cannot be ignored (`bumpResurfacedMission`).
-
-### Badge categories (Sprint 4.1)
-
-| Category | `requirement_type` | Examples | How earned |
-|----------|-------------------|----------|------------|
-| **Point badges** | `total_points` | Rising Star (100), Explorer (500), Legend (10,000) | Lifetime `child_points.total_points` threshold |
-| **Mission badges** | `missions_completed` | First Steps (1), Helper (10), Guardian Angel (500) | Count of completed missions |
-| **Age badges** | `age_range` | Little Explorer (6-9), Young Adventurer (10-12), Teen Champion (13-17) | Auto-awarded from `children.birth_year` on `checkAndAwardBadges` |
-| **Special badges** | `wellbeing_score_streak`, `cognitive_exercises_done`, `trigger_reason_count` | Well-being Warrior, Brain Trainer, Risk Buster | Legacy Sprint 4 rules |
-
-Age ranges are stored in `badges.requirement_config` JSONB (`{"min":10,"max":12}`). Only **one** age badge per child is kept — `PUT /api/child/profile` revokes mismatched age bands (and deducts their bonus points) before re-awarding the matching band.
-
-**Badge cleanup (`015_badge_cleanup.sql`):** Removes legacy duplicate definitions (`First Mission`, `Mission Master`) and cleans existing `child_badges` rows that no longer match the child's age. Superseded by **First Steps** / **Helper**.
-
-**Badge ranks guide (UX):** Parent dashboard **Badge ranks** button (earned-badges card) and child app **Ranks** header action open a progress view: all tiers grouped by category, current points/missions, progress bars toward the next point/mission badge, and locked special badges with requirement text.
-
-**Migration:** `008_add_smart_badges.sql` adds tiered point/mission badges and age badges.
-
-**Smoke test (API running on port 3000):**
-
-```powershell
-cd backend
-npm run dev          # separate terminal
-npm run smoke:missions
-```
-
-Script: [`backend/scripts/smoke-missions.ps1`](backend/scripts/smoke-missions.ps1) — health, dev tokens, generate/list/complete mission, points, badges, parent reward + child claim.
-
-**Sprint 5.8 smoke (wellbeing proxies + interests):**
-
-```powershell
-cd backend
-npm run dev          # separate terminal
-npm run smoke:sprint58
-```
-
-Script: [`backend/scripts/smoke-sprint58.ts`](backend/scripts/smoke-sprint58.ts) — interests API, age-based screen caps, mission tie-breaker (multiple ages/interests), wellbeing proxy seeding, daily score job, scores/level API, parent approval → physical proxy increment.
-
-**Sprint 5.9 backend tests (birth year, badge ranks data, screen caps):**
-
-```powershell
-cd backend
-npm run dev          # separate terminal
-npm run test:sprint59
-```
-
-Script: [`backend/scripts/test-sprint59.ts`](backend/scripts/test-sprint59.ts) — `GET/PUT /api/child/profile`, age badge re-award (`POST /api/dev/reward-age-badges/:childId`), `fetchRecommendedScreenMinutes` caps (120/150/180), ranks source data (`/api/badges?childId=`, points, mission count, level). Prints a manual UI checklist on success.
-
----
-
-## Sprint 5.5 – Dynamic quiz bank & custom missions
-
-| Feature | Details |
-|---------|---------|
-| **Quiz bank** | Table `quiz_questions` (`011_quiz_questions.sql`, `013_quiz_media_violence.sql`) — types `safety`, `media_violence`, `conflict`, `empathy`; filtered by child age (`age_min` / `age_max`). `quizService.getRandomQuestions` + `enrichQuizMetadata` attach questions to quiz missions at generation time. Mobile `QuizScreen` reads `metadata.questions` (falls back to `quizBank.ts` if empty). |
-| **Custom missions** | Table `custom_missions` (`012_custom_missions.sql`) — parent CRUD via `GET/POST/PUT/DELETE /api/custom-missions`. Active missions are merged into real-world template pools in `pickMissionTemplate`. |
-| **Dashboard** | **Custom real-world missions** section on [`demo_dashboard.html`](demo_dashboard.html) (served at `/demo.html`) — create, edit, delete. |
-| **OCR false positives** | `benignRiskContext` filters `nsfw` / `adult` on SafeSearch/Fiverr parental UI and parent-dashboard OCR; wired in mobile + backend `keywordFilter`. |
-| **Risky web search** | `riskySearchContext` boosts `nsfw` / `adult` when OCR shows an explicit query on Google/Bing/DuckDuckGo search URLs (complements benign filters). |
-| **Native overlay games** | `OverlayQuizHelper` / `OverlayMissionLauncher` — quiz and minigame/cognitive missions open in-app from overlay; `missionCaptureSession` dedupes capture while a mission is active. |
-| **Risky cooldown** | New risky missions are blocked only while a **pending** risky mission exists (completed missions no longer suppress the next capture). Re-surface still bumps pending missions during cooldown. |
-| **Adult mission pool** | `adult` category includes quizzes and minigames, not only real-world templates. |
-| **Overlay → game** | Quiz / minigame / cognitive overlay primary button emits `start` and opens `MissionScreen` (no API auto-complete from overlay). |
-
-**Add quiz questions (SQL example):**
-
-```sql
-INSERT INTO quiz_questions (quiz_type, question_text, options, correct_answer_index, age_min, age_max)
-VALUES ('safety', 'Your question?', ARRAY['Wrong', 'Correct', 'Wrong2', 'Wrong3'], 1, 6, 12);
-```
-
-**Migrations:** run `npm run db:migrate` from `backend/` after pulling (applies `011` and `012`).
-
-**Tests:** `quizService.test.ts`, `customMissionService.test.ts`, `benignRiskContext.test.ts`, `riskySearchContext.test.ts` (mobile + backend), extended `missionGenerator.test.ts` and `missionHelpers.test.ts`.
-
----
-
-## Next Steps (post Sprint 5.5)
-
-1. **Server-side game stats** – persist `child_game_stats` so smart difficulty follows the child across devices.
-2. **Parent dashboard polish** – multi-child list (`GET /api/children`), mission history charts.
-3. **FCM push** (optional) – replace dashboard polling for approvals.
-4. **Quiz admin UI** – web form to add/edit questions without raw SQL.
-
----
-
-## Documentation for Final Report
-
-Artefacts under `docs/`:
-
-| Document | Purpose | Status |
-|----------|---------|--------|
-| [`PREFINAL_REPORT.md`](docs/PREFINAL_REPORT.md) | Pre-final technical report (architecture, implementation, limitations, v1.0-final) | **Available** |
-| [`scoring_formulas.md`](docs/scoring_formulas.md) | Per-capture risk + addiction/wellbeing scoring definitions | **Available** |
-| [`SRS.md`](docs/SRS.md) | Software requirements (functional, non-functional, traceability) | **Available** |
-| [`architecture.md`](docs/architecture.md) | Component, data-model, runtime, and deployment views + ADRs | **Available** |
-| [`testing_strategy.md`](docs/testing_strategy.md) | Unit, integration/smoke, and manual device test plans (459 tests — 330 mobile / 129 backend) | **Available** |
-| [`deployment.md`](docs/deployment.md) | Dev + production deployment guide | **Available** |
-| [`scrum_artifacts.md`](docs/scrum_artifacts.md) | Sprint plan, reviews, retrospectives, backlog | **Available** |
-
-The final PFE report (PDF) will reference this repository and README.
+## Documentation
+
+| Document | Purpose |
+|----------|---------|
+| [`docs/architecture.md`](docs/architecture.md) | Components, data model, API surface, AI pipeline, capture, blocking, missions, timers, ADRs |
+| [`docs/SRS.md`](docs/SRS.md) | Functional and non-functional requirements, traceability |
+| [`docs/scoring_formulas.md`](docs/scoring_formulas.md) | Per-capture risk, addiction and well-being formulas |
+| [`docs/testing_strategy.md`](docs/testing_strategy.md) | Unit (Jest + JVM), smoke and manual device test plans |
+| [`docs/deployment.md`](docs/deployment.md) | Development and production deployment, troubleshooting |
+| [`docs/scrum_artifacts.md`](docs/scrum_artifacts.md) | Sprints (including the full sprint table), reviews, backlog |
+| [`docs/archive/PREFINAL_REPORT.md`](docs/archive/PREFINAL_REPORT.md) | Historical pre-final report (v1.0-final snapshot, not current) |
+
+The final PFE report (LaTeX/PDF) references this repository.
 
 ---
 
 ## License
 
-This project is developed for **educational purposes** as part of the ESPRIT PFE (final year project). All rights reserved by the author and the internship host organisation.
+This project is developed for **educational purposes** as part of the ESPRIT PFE (final year project). All rights reserved by the author and the internship host organisation. The bundled adult-domain list comes from StevenBlack/hosts (MIT) — see [`NOTICE`](NOTICE).
 
 **Maintainer:** [Helmi Megdiche](https://github.com/Helmi-Megdiche)  
-**Last updated:** 31 August 2026  
-**Status:** Final — full `docs/` artefact set delivered; capture-timer tuning, foreground self-heal, post-mission grace, mission-helper fixes; native perceptual-hash frame-skip gate; **accessibility-driven app-switch capture + keyboard suppression** (`windowEventFilter`, `SafeGuardAccessibilityService`); **380** automated tests (251 mobile + 129 backend).
+**Last updated:** 23 September 2026

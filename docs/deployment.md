@@ -1,8 +1,8 @@
 # Deployment Guide — SafeGuard AI Parental Control Platform
 
 **Author:** Helmi Megdiche — ESPRIT (5th-year PFE)
-**Repository:** [github.com/Helmi-Megdiche/PFE](https://github.com/Helmi-Megdiche/PFE)
-**Document version:** 1.0 (final)
+**Repository:** [github.com/Helmi-Megdiche/PFE_optimization](https://github.com/Helmi-Megdiche/PFE_optimization)
+**Document version:** Current `main` (post-Phase B, September 2026). v1.0-final (5 June 2026, `59da85b`) was the pre-Phase-B release.
 **Audience:** developers and operators deploying the backend, database, dashboard, and Android app.
 
 > This guide covers both the **development** setup (the supported PFE demo path) and a **production-oriented** deployment (recommended hardening). Where the two differ, both are shown.
@@ -77,6 +77,7 @@ JWT_SECRET=change-me-in-production-use-long-random-string
 JWT_ISSUER=pfe-parental-control
 LOG_LEVEL=info
 MISSION_RISK_COOLDOWN_MINUTES=2     # dev 2, prod 15
+APP_TIMEZONE=Africa/Tunis           # day boundaries, night window, cron fire time
 ```
 
 | Variable | Meaning | Production guidance |
@@ -87,7 +88,8 @@ MISSION_RISK_COOLDOWN_MINUTES=2     # dev 2, prod 15
 | `JWT_SECRET` | Token signing key | Long, random, secret-managed (not committed) |
 | `JWT_ISSUER` | Token issuer claim | Keep stable across restarts |
 | `LOG_LEVEL` | Log verbosity | `info` or `warn` |
-| `MISSION_RISK_COOLDOWN_MINUTES` | Risky-mission cooldown | **15** in production |
+| `MISSION_RISK_COOLDOWN_MINUTES` | How long an escaped (abandoned) risky mission keeps blocking a new one: a new risky-content mission is blocked while a pending risky mission exists or one was escaped within this window, and a further risky capture re-surfaces the existing mission instead | **15** in production (2 min in development) |
+| `APP_TIMEZONE` | IANA zone for score-day boundaries, the night-usage window and the 01:00 cron (default `Africa/Tunis`) | Validated at boot; an unknown zone name stops the server |
 
 > Never commit `.env`. It is already covered by `.gitignore`.
 
@@ -110,7 +112,7 @@ export const DEV_LAN_HOST = '192.168.x.x';  // your PC's Wi-Fi IPv4 (ipconfig)
 ```bash
 cd backend
 npm run db:up          # PostgreSQL 16 on host port 5433
-npm run db:migrate     # apply all migrations 000..015
+npm run db:migrate     # apply all migrations 000..016 (ledger-tracked, safe to re-run)
 ```
 
 `docker-compose.yml` provisions `pfe-postgres` with a healthcheck and a named volume `pfe_pg_data`.
@@ -126,11 +128,11 @@ cd backend
 npm run db:migrate
 ```
 
-The runner (`src/db/migrate.ts`) applies the SQL files in `src/db/migrations/` in lexical order, each in its own transaction, and records every applied file in a `schema_migrations` ledger it creates itself. Re-running is a safe no-op; a failed migration rolls back with no ledger row; editing an already-applied file is refused by checksum. A pre-existing database with no ledger is auto-detected — stamped without executing if it is already at head, otherwise the run aborts with a `MIGRATE_BASELINE_UPTO=<file>` resume hint. There is no `004` (numbering skips it); this is expected. See [architecture.md](architecture.md) §5.2 for the full migration inventory and `backend/DATABASE.md` for the ledger details.
+The runner (`src/db/migrate.ts`) applies the SQL files in `src/db/migrations/` in lexical order, each in its own transaction, and records every applied file in a `schema_migrations` ledger it creates itself. Re-running is a safe no-op; a failed migration rolls back with no ledger row; editing an already-applied file is refused by checksum. A pre-existing database with no ledger is auto-detected — stamped without executing if it is already at head, otherwise the run aborts with a `MIGRATE_BASELINE_UPTO=<file>` resume hint. There are 16 files, `000`–`016`; there is no `004` (numbering skips it), which is expected. See [architecture.md](architecture.md) §5.2 for the full migration inventory and `backend/DATABASE.md` for the ledger details.
 
 ### 4.3 Seed data
 
-`002_dev_seed.sql` inserts a demo parent and child used by `/api/dev/*` token minting. In production you would replace this with a real provisioning flow (out of scope for v1.0-final).
+Migrations `011` and `013` seed the quiz bank (22 questions: safety 5, conflict 5, empathy 4, media_violence 8), which is served from the database at mission-generation time. `002_dev_seed.sql` inserts a demo parent and child used by `/api/dev/*` token minting. In production you would replace this with a real provisioning flow (out of scope for v1.0-final).
 
 ---
 
@@ -172,16 +174,17 @@ User=safeguard
 WantedBy=multi-user.target
 ```
 
-The daily scoring cron is in-process (`node-cron`, 01:00 server-local). Ensure the server timezone matches your intended score-date boundary (scores use UTC date boundaries — see [scoring_formulas.md](scoring_formulas.md)).
+The daily scoring cron is in-process (`node-cron`) and fires at 01:00 in `APP_TIMEZONE`, whatever the host's own time zone. Score-day boundaries and the night-usage window use the same zone; bedtime variance is computed in UTC on purpose (see [scoring_formulas.md](scoring_formulas.md)).
 
 ---
 
 ## 6. Parent Dashboard Deployment
 
-The dashboard is `demo_dashboard.html` (repo root). The API serves it directly at `/demo.html` from that file — there is no copy under `backend/public/` and no sync step (ALL_IS_FIXED #5). A deploy must keep `demo_dashboard.html` one level above the backend directory (i.e. at the repo root, as checked out), or drop a copy at `backend/public/demo.html` — the `express.static` mount still serves that as a fallback. A missing file returns 404, not 500.
+The dashboard is `demo_dashboard.html` (repo root). The API serves it directly at `/demo.html` from that file — there is no copy under `backend/public/` and no sync step. A deploy must keep `demo_dashboard.html` one level above the backend directory (i.e. at the repo root, as checked out), or drop a copy at `backend/public/demo.html` — the `express.static` mount still serves that as a fallback. A missing file returns 404, not 500.
 
 - Access: `https://<your-domain>/demo.html`.
 - Use the backend URL (not `file://`) so browser notifications work.
+- The page refreshes every 10 s while open. Browser pop-up notifications (polled every 30 s) fire only for missions awaiting approval and for escaped missions. There is no push, email or SMS notification to the parent; browser block incidents are stored and shown on the dashboard only.
 - The dashboard authenticates with a parent JWT (from `/api/dev/parent-token` in dev). In production, wire it to a real login before exposing publicly.
 
 ---
@@ -196,6 +199,8 @@ npm install
 npm start              # Metro (:8081)
 npm run android        # build & install on device/emulator
 ```
+
+On Windows with the repository under OneDrive, `npm run android` fails; see the OneDrive row in [§11 Troubleshooting](#11-troubleshooting).
 
 ### 7.2 Release build
 
@@ -212,7 +217,7 @@ cd MobileApp/android
 
 Artifacts appear under `android/app/build/outputs/`.
 
-> **Rebuild triggers:** any change to native modules (`ScreenCaptureModule`, `ForegroundAppModule`, overlay) or the `nsfw.tflite` model requires a native rebuild (`npm run android` / gradle), not just a Metro reload.
+> **Rebuild triggers:** any change to native modules (`ScreenCaptureModule`, `ForegroundAppModule`, overlay, the accessibility service and its browser blocker), the `nsfw.tflite` model, or the bundled `adult_domains.txt` list requires a native rebuild (`npm run android` / gradle), not just a Metro reload.
 
 ### 7.3 Required device permissions
 
@@ -222,6 +227,10 @@ Artifacts appear under `android/app/build/outputs/`.
 | Foreground service notification | Android 14+ capture | Capture cannot run |
 | Usage Access (optional) | Accurate `app_package` | Falls back to ActivityManager (less accurate) |
 | Display over other apps | Mission overlay on third-party apps | Notification + in-app mission fallback |
+| Accessibility service ("SafeGuard", enabled by hand in Settings → Accessibility) | Adult-site blocking in Chrome; instant app-switch and keyboard detection | No site blocking; app switches fall back to a 1 s UsageStats poll |
+| Notifications (Android 13+) | Foreground-service and mission notifications | Notifications hidden |
+
+**Accessibility service caveat.** On some Android ROMs, swiping SafeGuard away from Recents stops the Accessibility service, and reopening the app does not restore it. Re-enable it by hand in Settings → Accessibility. To check it's running, look for a live window-change event in the logs; `settings get … enabled_accessibility_services` is not a reliable check. The Monitor tab's **Accessibility service** card reads **Active** only after the service has actually delivered an event.
 
 ---
 
@@ -270,7 +279,7 @@ server {
 - [ ] Log shipping and uptime monitoring on `/api/health`.
 - [ ] Review privacy/consent copy and legal framing (GDPR/COPPA).
 
-> These items reflect the security/operations limitations documented in [PREFINAL_REPORT.md](PREFINAL_REPORT.md) §4.7; the shipped v1.0-final is a demo-grade deployment.
+> These items reflect the limitations listed in [README.md — Known limitations / future work](../README.md#known-limitations--future-work); the current build is a demo-grade deployment.
 
 ---
 
@@ -300,14 +309,29 @@ Manual cron re-run (dev): call `runDailyScoreJob()` from `backend/src/jobs/daily
 | Gradle / OneDrive file locks | Syncing `android/build` via OneDrive | Clean `.gradle`; exclude build dirs from sync |
 | Dev token 401 loop | Backend down during refresh | Keep API on :3000; token auto-refreshes |
 | Empty OCR | Low-contrast/blank screen | Use screens with clear, larger text |
+| Accessibility card not **Active**, or adult sites not blocked | The OS stopped the accessibility service (e.g. SafeGuard swiped from Recents on some ROMs) | Re-enable it by hand in Settings → Accessibility, switch apps once, and confirm the card reads **Active** (see §7.3) |
+| Listed site opens for a moment after the service starts | The domain lists load in the background (under a second) | Expected; blocking starts once the lists are loaded |
+| `'gradlew.bat' is not recognized` or `Could not move temporary workspace` on Windows | Repository under OneDrive: the RN CLI spawns Gradle without `.`, and OneDrive locks Gradle's cache | From `MobileApp/android`: `.gradlew.bat --stop`, delete `android/.gradle`, then `.gradlew.bat app:installDebug --project-cache-dir C:/gradlecache/mobileapp -PreactNativeDevServerPort=8081`. Moving the repo out of OneDrive is the permanent fix |
 
-More detail in [README.md](../README.md) ("Common issues") and [architecture.md](architecture.md).
+### 11.1 Reading the Metro logs
+
+- `Risky capture — no mission overlay` + `cooldown_active` → detection worked; a pending risky mission already exists. The API should still return `newMission` with `reSurfaced: true` so the overlay reappears (look for `New mission from screen event`).
+- `Risky capture — no mission overlay` + `pending_limit_reached` → 3 or more unfinished `pending` missions (`pending_approval` does not count). An existing pending mission should be re-surfaced; otherwise complete or expire old ones.
+- `New mission from screen event` → a mission was created or the overlay path was taken.
+- `Mission presentation skipped — post-mission grace` → a mission just ended; the resume frame may not stack another overlay for 10 s (the risk event is still stored).
+- `Foreground lookup wedged — skipping await` → UsageStats hung while JS timers were frozen; the frame continues with `unknown` attribution and OCR still runs.
+- Repeated `OCR lock takeover` with no OCR/risk lines after `Frame received` → the pipeline was stuck on a wedged lookup; toggle monitoring off/on.
+- `Processing lock force-released after hung frame` with `cause: 'tick-liveness'` (`elapsed ≈ 60000`) or `cause: 'tick-phase-timeout:<phase>'` → a frame wedged and the native-tick backstop recovered it. `elapsed` far above 60 s (e.g. ~195000) means the screen was off and JS was frozen until it woke.
+- `frame.phase {from, to, appState, prevPhaseMs}` → per-phase timing for each capture.
+- `browser.block domain=… list=STATIC|DETECTED enforcement=…` (native tag) → a listed domain was blocked; `browser.add … reason=…` / `browser.leave …` → a screenshot-based add or Back-only leave.
+
+More detail in [README.md](../README.md) and [architecture.md](architecture.md) (§8.5 timers, §10.1 wedged-frame recovery).
 
 ---
 
 ## 12. Release Procedure
 
-1. Ensure all tests pass: mobile `181/23`, backend `129/17` (see [testing_strategy.md](testing_strategy.md)).
+1. Ensure all tests pass: mobile Jest `517/37 suites`, backend Jest `247/24 suites`, JVM `155` (11 test classes), and `tsc --noEmit` shows only the 2 known errors (see [testing_strategy.md](testing_strategy.md) §10).
 2. Update `README.md` and `docs/` as needed.
 3. Build backend (`npm run build`) and Android release artifact.
 4. Apply DB migrations to the target database.
@@ -319,4 +343,4 @@ More detail in [README.md](../README.md) ("Common issues") and [architecture.md]
 
 ---
 
-*End of deployment guide — SafeGuard v1.0-final.*
+*End of deployment guide — SafeGuard, current `main` (post-Phase B, September 2026).*

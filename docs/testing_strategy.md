@@ -1,9 +1,9 @@
 # Testing Strategy — SafeGuard AI Parental Control Platform
 
 **Author:** Helmi Megdiche — ESPRIT (5th-year PFE)
-**Repository:** [github.com/Helmi-Megdiche/PFE](https://github.com/Helmi-Megdiche/PFE)
-**Document version:** 1.0 (final)
-**Verified totals (final):** **459 automated tests** — **330 mobile** (26 suites) + **129 backend** (17 suites), all passing. (Mobile grew from 181 with the capture-pipeline hardening work: coordinator logic, window-event filter, adaptive-capture / liveness-backstop / per-phase-deadline reducers.)
+**Repository:** [github.com/Helmi-Megdiche/PFE_optimization](https://github.com/Helmi-Megdiche/PFE_optimization)
+**Document version:** Current `main` (post-Phase B, September 2026). v1.0-final (5 June 2026, `59da85b`) was the pre-Phase-B release.
+**Verified totals:** **919 automated tests**, all passing — **517 mobile Jest** (37 suites) + **247 backend Jest** (24 suites) + **155 JVM** (JUnit 4, 11 test classes). `tsc --noEmit` on the mobile app reports exactly 2 known errors, deferred on purpose (see §9).
 
 ---
 
@@ -30,7 +30,7 @@ The testing strategy targets the parts of SafeGuard most likely to break silentl
 - **API contracts** — mission lifecycle, approval, cooldown/resurface, and scoring endpoints, validated by unit tests plus smoke scripts against a running server.
 - **Device-only behaviour** — MediaProjection, UsageStats, overlays, and on-device model inference, validated manually because they depend on native permissions and OEM behaviour (MIUI).
 
-Out of scope for automation in v1.0-final: on-device UI end-to-end (no Detox/Appium), and native Java modules (validated manually).
+Out of scope for automation: on-device UI end-to-end (no Detox/Appium) and the Android-bound parts of the native modules (MediaProjection, UsageStats, overlay windows), which are validated manually. The pure-Java core of the browser blocker and the block-screen dismiss logic are JVM unit-tested (§4.1).
 
 ---
 
@@ -40,11 +40,11 @@ Out of scope for automation in v1.0-final: on-device UI end-to-end (no Detox/App
 graph TB
     M[Manual device tests<br/>MediaProjection, overlay, MIUI, models] --- top
     I[Integration / smoke scripts<br/>API flows against running server + DB]
-    U[Unit tests — 459<br/>pure logic, contracts, validators]
+    U[Unit tests — 919<br/>pure logic, contracts, validators]
     U --> I --> M
 ```
 
-- **Wide unit base (459 tests):** fast (< 10 s per suite), no device, no network. This is the primary regression safety net.
+- **Wide unit base (919 tests):** fast (< 10 s per suite), no device, no network. This is the primary regression safety net.
 - **Thin integration layer:** PowerShell/TS smoke scripts exercise real HTTP + PostgreSQL for end-to-end confidence.
 - **Manual apex:** documented, repeatable device checklists for anything that cannot be faked (permissions, overlays, camera of the screen, OEM quirks).
 
@@ -59,7 +59,8 @@ Testing philosophy: keep business rules in **pure modules** so they are testable
 | Mobile | Jest 29 (`preset: react-native`) | `MobileApp/package.json` (`jest`), `jest.setup.js` | Native modules and image assets mocked (`__mocks__/`) |
 | Backend | Jest 29 (`ts-jest`) | `backend/` Jest config | Pure logic tests avoid live DB; DB-backed paths use fakes/fixtures |
 | Smoke | PowerShell + `tsx` | `backend/scripts/*` | Require API on :3000 and a seeded database |
-| Combined | PowerShell | `scripts/run-all-tests.ps1` | Runs mobile + backend sequentially |
+| JVM (native) | JUnit 4.13.2 via Gradle | `MobileApp/android/app/src/test/java/` | Pure-Java browser blocker + overlay dismiss gate; no Android runtime needed |
+| Combined | PowerShell | `scripts/run-all-tests.ps1` | Runs the two Jest suites (mobile + backend) only; the JVM tests are run separately (§10) |
 
 Environments:
 
@@ -71,12 +72,12 @@ Environments:
 
 ## 4. Unit Tests — Mobile
 
-`MobileApp/__tests__/` — **26 suites, 330 tests**.
+`MobileApp/__tests__/` — **37 suites, 517 tests**.
 
 | Suite | Area under test |
 |-------|-----------------|
-| `adaptiveCapture.test.ts` | Risk-tier interval selection (10/15/20 s) + HIGH ≤ MEDIUM ≤ LOW invariant; native-tick subsample gate (5 s tick realizes every target exactly); `shouldForceReleaseProcessingLock` (60 s liveness backstop) and `shouldForceReleasePhase` (D1 per-phase deadlines, anti-stale guard, `vision`-never-fires regression guard); `decideTickAction` composition (absolute 60 s beats phase timeout beats subsample; D3 invariant guards — real start stamp still force-releases, zeroed stamp does not); `decideScrollSettle` (A3c-3 tick-driven scroll settle) |
-| `captureCoordinator.test.ts` | `createCaptureCoordinator` pure factory — request debounce (5 s) + follow-up gap, mission-pause / keyboard-suppression gating, priority coalescing of one pending reason, `isForceCaptureReason` / `isKeyboardSuppressibleReason` exhaustive over all `CaptureReason` members, owed-force debt (A3d) and native-rejection (`onNativeRejected`) handling |
+| `adaptiveCapture.test.ts` | Risk-tier interval selection (10/15/20 s) + HIGH ≤ MEDIUM ≤ LOW invariant; native-tick subsample gate (5 s tick realizes every target exactly); `shouldForceReleaseProcessingLock` (60 s liveness backstop) and `shouldForceReleasePhase` (per-phase deadlines, anti-stale guard, `vision`-never-fires regression guard); `decideTickAction` composition (absolute 60 s beats phase timeout beats subsample; generation-guard invariants — real start stamp still force-releases, zeroed stamp does not); `decideScrollSettle` (tick-driven scroll settle) |
+| `captureCoordinator.test.ts` | `createCaptureCoordinator` pure factory — request debounce (5 s) + follow-up gap, mission-pause / keyboard-suppression gating, priority coalescing of one pending reason, `isForceCaptureReason` / `isKeyboardSuppressibleReason` exhaustive over all `CaptureReason` members, owed-force debt (a missed app-switch capture is never dropped) and native-rejection (`onNativeRejected`) handling |
 | `windowEventFilter.test.ts` | `createWindowEventFilter` — rejects `OWN_PACKAGE` → `IME` → `SAME_PACKAGE` → `LAUNCHER_SETTLING` in order; launcher↔quicksearch flap collapses to one capture |
 | `appCapturePolicy.test.ts` | App-category interval caps (browser/social ≤ 15 s, game/system 0, education ≥ 120 s) |
 | `appSwitchCapture.test.ts` | Immediate + follow-up capture on app switch, debounce |
@@ -100,14 +101,38 @@ Environments:
 | `imageUri.test.ts` | Content URI handling |
 | `jwtUtils.test.ts` | JWT decode + `isJwtExpired` |
 | `App.test.tsx` | App renders / smoke |
+| `a11yHealth.test.ts` | Accessibility-service health tracker (off / enabled / active / not responding), evidence-based, no time decay |
+| `browserBlockDecision.test.ts` | When a Chrome frame adds a domain (adult category and raw NSFW ≥ 0.7) versus only leaving the page (OCR-only adult) |
+| `blockedDomainsSyncPlan.test.ts`, `blockedDomainsSync.test.ts` | Offline queue, one-time backfill, reconcile with the server list; a failed server read never wipes the device list |
+| `missionCaptureSession.test.ts` | Mission capture lease: heartbeat, overlay-still-showing query, 10 min soft limit, 1 h hard ceiling |
+| `missionCompletion.test.ts` | Completion payloads per mission type, including Tic-Tac-Toe board evidence |
+| `completionFailure.test.ts` | Child-readable handling of every completion failure (retry / close, never a raw error) |
+| `foregroundApp.test.ts` | Foreground lookup retry rules (single attempt when backgrounded) |
+| `mobileArabicOcr.test.ts` | Arabic OCR single-flight, staleness check and per-session disable |
+| `gameGridLayout.test.ts` | Game boards fit every column (border-box arithmetic) |
+| `overlayThemeParity.test.ts` | Overlay colours and spacing match the app's `focus` theme |
 
-**Key invariants asserted:** capture interval ordering, quiz pass threshold (≥ 2/3), minimax unbeatability, filtered-SERP cap unless explicit query, and mission debounce windows.
+**Key invariants asserted:** the 0.7 raw-NSFW floor for learning a domain, capture interval ordering, quiz pass threshold (≥ 2/3), minimax unbeatability, filtered-SERP cap unless explicit query, and mission debounce windows.
+
+### 4.1 JVM unit tests (native)
+
+`MobileApp/android/app/src/test/java/com/mobileapp/` — **11 test classes, 155 tests** (JUnit 4). They cover the Android-free core of the Chrome blocker and the block-screen dismiss logic:
+
+| Class | Area under test |
+|-------|-----------------|
+| `HostNormalizerTest` | Address-bar text → lowercased host only (scheme, user info, port, path, query and fragment dropped; a focused bar is never read as a host) |
+| `DomainMatcherTest`, `NeverBlockListTest` | Registrable-domain matching; never-block list (search engines; shared-hosting suffixes stored exactly) |
+| `HashedDomainSetTest`, `DomainListsTest`, `AdultAssetTest` | Static list lookup, learned-domain file (snapshot rewrite, reconcile), bundled list integrity |
+| `HostHistoryTest`, `BrowserBlockControllerTest` | Capture-time attribution (≤ 30 s old, no host change since, never blame a frame taken after Chrome left); one enforcement sequence at a time; re-check when the lists finish loading |
+| `BrowserUrlWatcherTest` | Only Chrome events are read |
+| `DevStaticSwitchTest` | Debug-only switches are unreachable in release builds |
+| `OverlayWindowHelperDismissGateTest` | The block screen's OK opens a fresh Chrome tab before the overlay is removed; mission overlays never do |
 
 ---
 
 ## 5. Unit Tests — Backend
 
-`backend/tests/` — **17 suites, 129 tests**.
+`backend/tests/` — **24 suites, 247 tests**.
 
 | Suite | Area under test |
 |-------|-----------------|
@@ -127,8 +152,13 @@ Environments:
 | `child.validator.test.ts` | Interests tag validation (Joi) |
 | `arabicOcr.test.ts` | Debug Arabic OCR extraction |
 | `debugPipeline.test.ts` | Debug classify pipeline (nsfwjs + Tesseract) |
+| `routeAuthorization.test.ts`, `childAccess.test.ts` | Every mounted route is classified against a committed inventory; parent→child ownership enforced (403 otherwise) |
+| `blockedDomains.routes.test.ts` | Live HTTP: another parent gets 403, the dev unblock route is a flat 404 in production, malformed domains get 400 |
+| `blockedDomainsService.test.ts`, `blockedDomains.validator.test.ts` | Add / already-active / ignored / reactivated outcomes; host-only domain validation (no path, query, scheme or user info) |
+| `screenEvents.validator.test.ts` | Screen-event payload bounds (≤500-char preview, bounded classifier details) |
+| `migrationPlan.test.ts` | Migration ledger decisions: run once, checksum refusal, baseline of an existing database |
 
-**Key invariants asserted:** exposure penalty cap (+20), adaptive threshold clamp (50–80), cumulative trigger (sum > 300, ≥ 3 events), 3-pending limit semantics, and resurface-not-recreate behaviour during cooldown.
+**Key invariants asserted:** Tic-Tac-Toe board replay (a fabricated win earns 0 points), exposure penalty cap (+20), adaptive threshold clamp (50–80), cumulative trigger (sum > 300, ≥ 3 events), 3-pending limit semantics, and resurface-not-recreate behaviour during cooldown.
 
 ---
 
@@ -148,7 +178,7 @@ Located in `backend/scripts/`. Require the API on :3000 and a migrated, seeded d
 
 ## 7. Manual Device Test Plans
 
-These require a physical Android device and cannot be automated in v1.0-final. See also `MobileApp/TESTING.md` if present.
+These require a physical Android device and are not automated. See also `MobileApp/TESTING.md` if present.
 
 ### 7.1 Permissions & capture
 
@@ -203,6 +233,18 @@ These require a physical Android device and cannot be automated in v1.0-final. S
 | 1 | Open `/demo.html`, load child | Scores, level, events, badges render |
 | 2 | Approve a pending real-world mission | Points awarded; wellbeing physical proxy increments next cron |
 | 3 | Edit interests / birth year | Persisted; age badge re-awarded |
+| 4 | Open the Parent Dashboard tab after a block | "Blocked sites" and "Browser incidents" panels list the domain (read-only; no parent unblock control) |
+
+### 7.7 Accessibility service and adult-site blocking (Chrome)
+
+| # | Step | Expected |
+|---|------|----------|
+| 1 | Enable Settings → Accessibility → SafeGuard, switch apps once | Monitor tab's **Accessibility service** card reads **Active** |
+| 2 | Swipe SafeGuard away from Recents, reopen it | On some ROMs the service is stopped and not restored; card is not **Active**. Re-enable by hand |
+| 3 | Type a domain from the static list into Chrome | Back within ~130 ms of the address-bar event, then a full-screen block screen; its OK opens a fresh blank Chrome tab |
+| 4 | Open an unlisted adult page that fills the screen with an explicit image | Raw NSFW ≥ 0.7 → domain learned, Back pressed, mission shown; a repeat visit is blocked in 117–160 ms |
+| 5 | Open a page whose text (not image) reads as adult | Back pressed once; nothing is added to the list and no incident is recorded |
+| 6 | Unblock a learned domain via the dev endpoint, toggle monitoring off/on, revisit | Device list reconciled with the server; the page is no longer blocked |
 
 ---
 
@@ -212,7 +254,7 @@ These require a physical Android device and cannot be automated in v1.0-final. S
 |-----------|--------|-----------|
 | Privacy | Inspect network payloads; confirm no image bytes leave device on production path | Only text preview (≤ 500) + scores |
 | Performance | Metro `[NSFW] TFLite` and pipeline timings; ensure < 25 s budget | English frames fast; Arabic within budget |
-| Reliability | Force hung frame; observe in-frame watchdog (foreground) and the native-tick backstops — 60 s tick-liveness, D1 per-phase deadlines, D3 generation-guarded `finally` (backgrounded) | Pipeline recovers, no permanent stall (screen-on when backgrounded) |
+| Reliability | Force hung frame; observe in-frame watchdog (foreground) and the native-tick backstops — 60 s tick-liveness, per-phase deadlines, generation-guarded `finally` (backgrounded) | Pipeline recovers, no permanent stall (screen-on when backgrounded) |
 | Security | Call protected route without JWT | 401; `/dev` and `/debug` absent in production |
 | Battery | Extended monitoring session | Adaptive intervals reduce capture on low-risk screens |
 
@@ -225,14 +267,15 @@ These require a physical Android device and cannot be automated in v1.0-final. S
 **Known gaps (honest):**
 
 - No automated UI E2E (Detox/Appium not integrated).
-- Native Java modules (`ScreenCaptureModule`, `ForegroundAppModule`, overlay) rely on manual validation.
-- `useScreenshotCapture` has **no hook test harness** — its event-reaction logic (native-rejection handling, tick subsample wiring, monitoring-revoke handling, and the D3 `finally` guard) is covered by extracted pure reducers (`decideTickAction`, coordinator factory) plus device smoke, not by unit tests of the hook itself.
+- The Android-bound parts of the native modules (`ScreenCaptureModule`, `ForegroundAppModule`, overlay windows, the accessibility service itself) rely on manual validation; only the pure-Java blocker core and dismiss gate are JVM-tested.
+- `tsc --noEmit` reports 2 known errors in `useScreenshotCapture.ts` (two early returns without a result object). They are deferred on purpose: fixing them changes what the Monitor card shows during the demo.
+- `useScreenshotCapture` has **no hook test harness** — its event-reaction logic (native-rejection handling, tick subsample wiring, monitoring-revoke handling, and the generation-guarded `finally`) is covered by extracted pure reducers (`decideTickAction`, coordinator factory) plus device smoke, not by unit tests of the hook itself.
 - JS-side wedged-frame backstops (tick-liveness, per-phase deadlines) recover a frame that hangs while the phone is **locked** only when the screen wakes — MIUI freezes the RN JS thread on screen-off despite the foreground service. A screen-off native recovery is future work.
 - Backend DB-integration assertions depend on seed state; smoke scripts are not hermetic.
 - On-device model numerics differ from server debug (nsfwjs/Tesseract) — debug scores are **not** production scores.
 - No load/soak testing; single-node assumptions untested at scale.
 
-These gaps are consistent with the limitations recorded in [PREFINAL_REPORT.md](PREFINAL_REPORT.md) §4.9.
+These gaps are consistent with [README.md — Known limitations / future work](../README.md#known-limitations--future-work).
 
 ---
 
@@ -252,7 +295,21 @@ cd backend
 npm test
 ```
 
-**All unit tests (mobile + backend)**
+**JVM unit tests (native, Android-free)**
+
+```powershell
+cd MobileApp/android
+.gradlew.bat app:testDebugUnitTest --project-cache-dir C:/gradlecache/mobileapp
+```
+
+**Type check (mobile)**
+
+```bash
+cd MobileApp
+npx tsc --noEmit    # expect exactly 2 known errors
+```
+
+**Both Jest suites (mobile + backend) — does not run the JVM tests**
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts/run-all-tests.ps1
@@ -268,8 +325,8 @@ npm run smoke:sprint58
 npm run test:sprint59
 ```
 
-**Expected result at final:** mobile `330 passed / 26 suites`, backend `129 passed / 17 suites` (total **459**).
+**Expected result:** mobile Jest `517 passed / 37 suites`, backend Jest `247 passed / 24 suites`, JVM `155 passed` (11 test classes) — total **919**; `tsc` exactly 2 known errors.
 
 ---
 
-*End of testing strategy — SafeGuard v1.0-final.*
+*End of testing strategy — SafeGuard, current `main` (post-Phase B, September 2026).*

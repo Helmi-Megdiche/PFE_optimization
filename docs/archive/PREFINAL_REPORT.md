@@ -1,9 +1,11 @@
+> **Historical snapshot as of v1.0-final (5 June 2026, `59da85b`). Superseded by the final LaTeX report; figures are not current.** For the current system see [README.md](../../README.md) and [docs/](../).
+
 # Pre-Final Technical Report
 
 **Project:** AI Parental Control Platform (SafeGuard)  
 **Author:** Helmi Megdiche — ESPRIT (5th year PFE)  
 **Internship period:** 01/02/2026 – 31/07/2026  
-**Repository:** [github.com/Helmi-Megdiche/PFE](https://github.com/Helmi-Megdiche/PFE)  
+**Repository:** [github.com/Helmi-Megdiche/PFE_optimization](https://github.com/Helmi-Megdiche/PFE_optimization)  
 **Release reference:** tag `v1.0-final` — commit `59da85b` (5 June 2026)  
 **Document version:** 1.0 (pre-final)
 
@@ -579,7 +581,7 @@ Representative backend test areas: `scoringEngine`, `wellbeingProxies`, `mission
 - No automated on-device UI tests (Detox/Appium not integrated).
 - Smoke tests depend on dev DB state (pre-existing missions affect counts).
 - Native Java modules (`ForegroundAppModule`, `NsfwTflite`) rely on manual device validation.
-- No load/soak testing; single-node assumptions untested at scale. (Formal [`testing_strategy.md`](testing_strategy.md) is now delivered.)
+- No load/soak testing; single-node assumptions untested at scale. (Formal [`testing_strategy.md`](../testing_strategy.md) is now delivered.)
 
 ---
 
@@ -663,7 +665,7 @@ The following limitation map was produced during pre-final review and is organis
 
 | Limitation | Detail |
 |------------|--------|
-| **Formal docs completed** | Full `docs/` set delivered: [`SRS.md`](SRS.md), [`architecture.md`](architecture.md), [`testing_strategy.md`](testing_strategy.md), [`deployment.md`](deployment.md), [`scrum_artifacts.md`](scrum_artifacts.md), and [`scoring_formulas.md`](scoring_formulas.md) alongside this report. |
+| **Formal docs completed** | Full `docs/` set delivered: [`SRS.md`](../SRS.md), [`architecture.md`](../architecture.md), [`testing_strategy.md`](../testing_strategy.md), [`deployment.md`](../deployment.md), [`scrum_artifacts.md`](../scrum_artifacts.md), and [`scoring_formulas.md`](../scoring_formulas.md) alongside this report. |
 | **No native parent app or host integration proof** | Harder to claim full “integration with existing applications” without a dedicated integration document or demo. |
 
 ### 4.9 Smoke-test boundaries (observed, not broken)

@@ -70,17 +70,17 @@ Prevents a timid image model from diluting a clear keyword hit:
 
 ## Input: Daily Usage Statistics
 
-Aggregated per child per calendar day (UTC) from `usage_sessions`:
+Aggregated per child per calendar day from `usage_sessions`. Day boundaries use the configured `APP_TIMEZONE` (default `Africa/Tunis`, validated at boot):
 
 | Field | Description |
 |-------|-------------|
 | `totalScreenMinutes` | Sum of session durations |
 | `sessionCount` | Number of sessions |
-| `nightMinutes` | Minutes in 22:00–06:00 UTC |
+| `nightMinutes` | Minutes in 22:00–06:00 local time (`APP_TIMEZONE`) |
 | `weekOverWeekChangePercent` | Change vs. same weekday 7 days earlier |
 | `physicalActivityMinutes` | Completed real-world physical missions on score date × 10 min (max 60) |
 | `educationalScreenMinutes` | Time in `educational` or `creative` categories |
-| `bedtimeVarianceMinutes` | Stddev of daily last `usage_sessions.end_time` over prior 7 days (fallback 30) |
+| `bedtimeVarianceMinutes` | Stddev of daily last `usage_sessions.end_time` over prior 7 days (fallback 30). Computed in **UTC** on purpose: the standard deviation is taken over seconds since midnight, and converting to local time would move the midnight wrap onto the most common real bedtime |
 | `familyCallsMessages` | Count of completed family-interaction missions on score date |
 | `recommendedScreenMinutes` | Age-based cap from `children.birth_year` (<10 → 120, 10–12 → 150, 13+ → 180) |
 
@@ -139,7 +139,7 @@ Component columns (`intensity`, `compulsivity`, etc.) still reflect the **base**
 
 ## Daily Cron Job
 
-- **Schedule:** `01:00` every day (server local time) via `node-cron`
+- **Schedule:** `01:00` every day in `APP_TIMEZONE` (default `Africa/Tunis`) via `node-cron`, independent of the host's own time zone
 - **Process:** For each row in `children`, aggregate yesterday’s sessions, compute both scores, upsert `daily_scores`
 - **Manual re-run:** Call `runDailyScoreJob()` from `backend/src/jobs/dailyScoreJob.ts` in a REPL or add a dev script
 
@@ -163,7 +163,7 @@ Implemented in `backend/src/scoring/wellbeingProxies.ts` and wired in `dailyScor
 | Proxy | Source | Notes |
 |-------|--------|-------|
 | **Physical activity** | `missions` where `status = 'completed'`, `metadata.type = 'real_world'`, `templateKey = 'physical_activity'` or `action IN ('jumping_jacks', …)` | 10 min per mission, capped at 60 |
-| **Bedtime variance** | Max daily `usage_sessions.end_time` over 7-day window | `STDDEV` of time-of-day; fallback 30 min if insufficient data |
+| **Bedtime variance** | Max daily `usage_sessions.end_time` over 7-day window | `STDDEV` of time-of-day (UTC, see above); fallback 30 min if insufficient data |
 | **Family interaction** | Completed missions with family-related `templateKey` or `action` | Count feeds `familyInteraction` component (`× 10`, max 100) |
 
 Real-world missions count only after **parent approval** (`status = 'completed'`, `completed_at` set).
