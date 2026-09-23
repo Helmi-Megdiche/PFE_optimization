@@ -2,6 +2,10 @@
     <string name="app_name">MobileApp</string>
     <string name="overlay_mission_badge">ACTIVE MISSION</string>
     <string name="overlay_mission_warning">Complete this mission to continue using your device. Later applies a -10 point escape penalty.</string>
+    <string name="overlay_mission_browser_warning">An adult website was opened and has been blocked.</string>
+    <string name="overlay_block_title">Inappropriate content</string>
+    <string name="overlay_block_body">This site is blocked. Your parent can see this incident.</string>
+    <string name="overlay_block_ok">OK</string>
     <string name="overlay_mission_later">Later (escape penalty)</string>
     <string name="overlay_mission_complete_real_world">Mark as done</string>
     <string name="overlay_mission_start_quiz">Start quiz</string>

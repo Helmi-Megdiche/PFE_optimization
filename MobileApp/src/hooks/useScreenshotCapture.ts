@@ -18,6 +18,24 @@ import {clearStaleNotificationMissionLaunch} from '../missions/missionNotificati
 import {presentMissionFromCapture} from '../missions/presentMissionFromCapture';
 import {withTimeout} from '../utils/withTimeout';
 import {
+  addDetectedDomainForFrame,
+  leaveBlockedPageForFrame,
+  resolveCaptureTimestampMs,
+  shouldShowBlockScreen,
+  shouldShowBrowserWarning,
+} from '../utils/browserBlockDecision';
+import {
+  addDetectedDomain,
+  leaveBlockedPage,
+  showBrowserBlockScreen,
+  type BrowserBlockedEvent,
+} from '../native/SafeGuardAccessibility';
+import {
+  queueBlockedDomainDetection,
+  reportBrowserIncident,
+  runBlockedDomainsSync,
+} from '../services/blockedDomainsSync';
+import {
   applyExplicitOcrBoost,
   applyPostProcessingOverride,
   combineRiskScores,
@@ -531,10 +549,21 @@ export function useScreenshotCapture(
     );
   }, []);
 
+  /**
+   * Phase B Task 11: a URL-watcher match (static or dynamic list) ran Back + block screen.
+   * Posted best-effort, not queued on failure — see `reportBrowserIncident`'s own doc comment.
+   * The F2 leave-only path never emits this event (no list write, no incident) — that adult
+   * detection already reaches the parent via the screen event it fires from.
+   */
+  const handleBrowserBlocked = useCallback((event: BrowserBlockedEvent) => {
+    void reportBrowserIncident(event.host, event.listSource, event.timestamp);
+  }, []);
+
   const {connected: a11yConnected} = useAccessibilityEvents({
     onWindowChanged: handleA11yWindowChanged,
     onKeyboardChanged: handleA11yKeyboardChanged,
     onScroll: handleA11yScroll,
+    onBrowserBlocked: handleBrowserBlocked,
   });
 
   useEffect(() => {
@@ -1046,6 +1075,77 @@ export function useScreenshotCapture(
           return {success: false, skippedReason: 'stale'};
         }
 
+        // Phase B: attribute this frame to the Chrome host it was captured on and blacklist it. Runs
+        // BEFORE the POST so the domain is listed as early as possible; bounded to 500 ms (A7) and
+        // never allowed to break the pipeline. The capture time comes from the native frame event
+        // (never "now"); an add that cannot be attributed is refused natively and logged.
+        let browserAdult = false;
+        let browserListed = false;
+        try {
+          const browserAdd = await addDetectedDomainForFrame(
+            {
+              finalCategory,
+              adultScore: imageClassification.adultScore,
+              appPackage: attributionPackage,
+              event,
+            },
+            {addDetectedDomain},
+          );
+          if (browserAdd.qualifies) {
+            if (browserAdd.skipped) {
+              scWarn('browser.add skipped', {reason: browserAdd.skipped});
+            } else {
+              browserListed = browserAdd.result.listed;
+              scLog('browser.add', {
+                added: browserAdd.result.added,
+                listed: browserAdd.result.listed,
+                reason: browserAdd.result.reason,
+                host: browserAdd.result.host,
+              });
+              // Task 11: a genuinely new domain — queue it for the backend right away rather
+              // than waiting for the next full sync. Duplicates/reactivations are NOT re-queued
+              // here; the periodic full sync (runBlockedDomainsSync) is what reconciles those.
+              if (browserAdd.result.added && browserAdd.result.host) {
+                const capturedAtMs =
+                  resolveCaptureTimestampMs(event) ?? Date.now();
+                void queueBlockedDomainDetection(
+                  browserAdd.result.host,
+                  capturedAtMs,
+                );
+              }
+            }
+          } else {
+            // F2: the image check did not clear the blacklist threshold (or the category/package
+            // gate failed outright) — still send the child back on ANY adult detection in Chrome,
+            // including an OCR-only one, so a false positive never leaves the child parked on the
+            // page. When addDetectedDomain DID qualify above, its own Back-only sequence already
+            // covers it — shouldAddDetectedDomain's conditions are a strict subset of
+            // shouldLeaveBlockedPage's, so this branch only runs when that one didn't fire.
+            const browserLeave = await leaveBlockedPageForFrame(
+              {finalCategory, appPackage: attributionPackage, event},
+              {leaveBlockedPage},
+            );
+            if (browserLeave.qualifies) {
+              if (browserLeave.skipped) {
+                scWarn('browser.leave skipped', {reason: browserLeave.skipped});
+              } else {
+                scLog('browser.leave', {
+                  left: browserLeave.result.left,
+                  reason: browserLeave.result.reason,
+                  host: browserLeave.result.host,
+                });
+              }
+            }
+          }
+          browserAdult = shouldShowBrowserWarning({
+            qualifies: browserAdd.qualifies,
+            appPackage: attributionPackage,
+            listed: browserListed,
+          });
+        } catch (browserErr) {
+          scWarn('browser.add failed', browserErr);
+        }
+
         setPhase('api_post');
         const screenEventResponse = await withTimeout(
           postScreenEvent(payload),
@@ -1067,6 +1167,7 @@ export function useScreenshotCapture(
           return {success: true, skippedReason: 'stale'};
         }
 
+        let presentedMission = false;
         if (screenEventResponse.newMission?.id) {
           const nm = screenEventResponse.newMission;
           if (isLauncherPackage(attributionPackage)) {
@@ -1091,6 +1192,7 @@ export function useScreenshotCapture(
               title: nm.title,
               reSurfaced: nm.reSurfaced ?? false,
             });
+            presentedMission = true;
             void presentMissionFromCapture(
               {
                 missionId: nm.id,
@@ -1102,7 +1204,7 @@ export function useScreenshotCapture(
                 ),
                 metadata: (nm.metadata ?? {}) as Record<string, unknown>,
               },
-              {reSurfaced: nm.reSurfaced},
+              {reSurfaced: nm.reSurfaced, browserAdult},
             );
           } else {
             scLog('Mission presentation skipped — debounce or startup grace', {
@@ -1121,6 +1223,11 @@ export function useScreenshotCapture(
           scLog('Risky capture — no mission in API response', {
             combinedRiskScore,
           });
+        }
+        // Phase B (A1/B9): no mission took the child's screen (cooldown, launcher, grace, debounce...),
+        // so the block screen must. A mission, when presented, always wins over the block screen.
+        if (shouldShowBlockScreen({listed: browserListed, presentedMission})) {
+          void showBrowserBlockScreen();
         }
         setLastCaptureAt(payload.timestamp);
         coordinatorRef.current!.onFrameAccepted(Date.now());
@@ -1546,6 +1653,10 @@ export function useScreenshotCapture(
       setLastError(null);
       markMonitoringStarted();
       clearStaleNotificationMissionLaunch();
+      // Task 11: fire-and-forget — flush the offline queue, backfill once, reconcile the
+      // device's dynamic list against the server's current active set. Never blocks monitoring
+      // start on network I/O.
+      void runBlockedDomainsSync();
 
       return true;
     } catch (err) {

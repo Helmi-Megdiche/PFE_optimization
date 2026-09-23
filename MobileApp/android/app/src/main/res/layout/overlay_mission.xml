@@ -85,6 +85,19 @@
                     android:textColor="@color/overlay_caption"
                     android:textSize="@dimen/overlay_text_caption" />
 
+                <!-- Phase B (B6): shown by OverlayWindowHelper only when EXTRA_BROWSER_ADULT is set. -->
+                <TextView
+                    android:id="@+id/overlay_browser_warning"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/overlay_spacing_lg"
+                    android:lineSpacingExtra="4dp"
+                    android:text="@string/overlay_mission_browser_warning"
+                    android:textColor="@color/overlay_warning"
+                    android:textSize="@dimen/overlay_text_warning"
+                    android:textStyle="bold"
+                    android:visibility="gone" />
+
                 <TextView
                     android:id="@+id/overlay_warning"
                     android:layout_width="match_parent"

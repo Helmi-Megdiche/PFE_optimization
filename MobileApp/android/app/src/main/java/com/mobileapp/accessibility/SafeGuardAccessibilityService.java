@@ -7,6 +7,8 @@ import android.util.Log;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityWindowInfo;
 
+import com.mobileapp.accessibility.browser.BrowserBlockRuntime;
+
 import java.util.List;
 
 /**
@@ -14,9 +16,14 @@ import java.util.List;
  *
  * <p>Emits three structured signals to JS via {@link AccessibilityEventBridge}:
  * foreground window/package changes, software-keyboard visibility changes, and
- * (throttled) scroll activity. It never reads node text, {@code AccessibilityNodeInfo}
- * content, URLs, or field values — package names and booleans only. Nothing consumes
- * these events yet; this class only establishes and proves the stream.
+ * (throttled) scroll activity. Those three JS-facing signals carry package names and booleans
+ * only.
+ *
+ * <p><b>Phase B exception (the only one).</b> {@link BrowserBlockRuntime} reads ONE node: Chrome's
+ * address bar ({@code com.android.chrome:id/url_bar}), text and focus flag only, and only for
+ * events whose package is Chrome. It keeps the host, never logs the raw text, and never reads
+ * page content, other fields or passwords. {@code TYPE_WINDOW_CONTENT_CHANGED} is routed there
+ * exclusively and never reaches the three handlers above.
  *
  * <p>Runs independently of the React Native lifecycle, hence the buffering bridge.
  */
@@ -43,6 +50,9 @@ public class SafeGuardAccessibilityService extends AccessibilityService {
     private long lastScrollEmitMs;
     private long lastWindowsQueryMs;
 
+    /** Phase B browser blocker; null if it failed to start. */
+    private volatile BrowserBlockRuntime browser;
+
     @Override
     protected void onServiceConnected() {
         super.onServiceConnected();
@@ -50,7 +60,10 @@ public class SafeGuardAccessibilityService extends AccessibilityService {
         AccessibilityServiceInfo info = new AccessibilityServiceInfo();
         info.eventTypes = AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
                 | AccessibilityEvent.TYPE_WINDOWS_CHANGED
-                | AccessibilityEvent.TYPE_VIEW_SCROLLED;
+                | AccessibilityEvent.TYPE_VIEW_SCROLLED
+                // Phase B: fires in every app. Routed ONLY to BrowserBlockRuntime (see
+                // onAccessibilityEvent) — never to the window/scroll/keyboard handlers below.
+                | AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED;
         info.feedbackType = AccessibilityServiceInfo.FEEDBACK_GENERIC;
         info.flags = AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
                 | AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS;
@@ -59,7 +72,35 @@ public class SafeGuardAccessibilityService extends AccessibilityService {
         setServiceInfo(info);
 
         instance = this;
+        startBrowserBlocker();
         Log.i(TAG, "service connected");
+    }
+
+    /** Phase B. A failure here must never affect the existing window/keyboard/scroll events. */
+    private void startBrowserBlocker() {
+        try {
+            if (browser != null) {
+                browser.shutdown();
+            }
+            browser = new BrowserBlockRuntime(this);
+            browser.startLoading();
+        } catch (Throwable t) {
+            browser = null;
+            Log.w(TAG, "browser blocker unavailable", t);
+        }
+    }
+
+    private void stopBrowserBlocker() {
+        BrowserBlockRuntime b = browser;
+        browser = null;
+        if (b != null) {
+            b.shutdown();
+        }
+    }
+
+    /** For the RN bridge (Phase B): null when the blocker failed to start. */
+    public BrowserBlockRuntime getBrowserBlocker() {
+        return browser;
     }
 
     @Override
@@ -69,6 +110,18 @@ public class SafeGuardAccessibilityService extends AccessibilityService {
         }
         try {
             final int type = event.getEventType();
+
+            // Phase B: TYPE_WINDOW_CONTENT_CHANGED belongs to the browser blocker ONLY. Return
+            // before anything below runs, so no window/keyboard/scroll handler (and nothing that
+            // feeds JS capture triggers or the mission-lease backstop) ever sees it.
+            if (type == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED) {
+                BrowserBlockRuntime b = browser;
+                if (b != null) {
+                    b.onContentChanged(event);
+                }
+                return;
+            }
+
             final long wallClock = System.currentTimeMillis();
 
             if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
@@ -100,6 +153,13 @@ public class SafeGuardAccessibilityService extends AccessibilityService {
         String pkg = raw.toString();
         if (pkg.equals(getPackageName())) {
             return;
+        }
+        // Phase B: every foreground-window change reaches the browser blocker, including repeats
+        // of the same package (a returning-to-Chrome state change forces a match) — so this sits
+        // BEFORE the package-change dedupe below, which only serves the JS window event.
+        BrowserBlockRuntime b = browser;
+        if (b != null) {
+            b.onWindowStateChanged(event, pkg);
         }
         if (pkg.equals(lastWindowPackage)) {
             return;
@@ -156,6 +216,7 @@ public class SafeGuardAccessibilityService extends AccessibilityService {
     @Override
     public boolean onUnbind(android.content.Intent intent) {
         instance = null;
+        stopBrowserBlocker();
         Log.i(TAG, "service unbound");
         return super.onUnbind(intent);
     }
@@ -163,6 +224,7 @@ public class SafeGuardAccessibilityService extends AccessibilityService {
     @Override
     public void onDestroy() {
         instance = null;
+        stopBrowserBlocker();
         Log.i(TAG, "service destroyed");
         super.onDestroy();
     }

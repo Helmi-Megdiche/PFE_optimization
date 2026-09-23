@@ -21,6 +21,7 @@ interface OverlayMissionNativeModule {
     points: number,
     missionType: string,
     metadataJson: string,
+    browserAdult: boolean,
   ): Promise<boolean>;
   hideOverlay(): Promise<boolean>;
   isOverlayShowing(): Promise<boolean>;
@@ -61,6 +62,8 @@ export async function showMissionOverlay(params: {
   points: number;
   missionType: string;
   metadata: Record<string, unknown>;
+  /** Phase B (B6): show the adult-site warning line. Set from the R4 condition, not from an add. */
+  browserAdult?: boolean;
 }): Promise<boolean> {
   const mod = getModule();
   if (!mod) {
@@ -73,6 +76,7 @@ export async function showMissionOverlay(params: {
     params.points,
     params.missionType,
     JSON.stringify(params.metadata ?? {}),
+    params.browserAdult === true,
   );
   return true;
 }

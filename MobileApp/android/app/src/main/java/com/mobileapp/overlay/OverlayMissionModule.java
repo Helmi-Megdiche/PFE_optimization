@@ -45,6 +45,7 @@ public class OverlayMissionModule extends ReactContextBaseJavaModule {
             int points,
             String missionType,
             String metadataJson,
+            boolean browserAdult,
             Promise promise) {
         try {
             ReactApplicationContext ctx = getReactApplicationContext();
@@ -62,6 +63,7 @@ public class OverlayMissionModule extends ReactContextBaseJavaModule {
             intent.putExtra(OverlayService.EXTRA_POINTS, points);
             intent.putExtra(OverlayService.EXTRA_MISSION_TYPE, missionType);
             intent.putExtra(OverlayService.EXTRA_METADATA_JSON, metadataJson);
+            intent.putExtra(OverlayService.EXTRA_BROWSER_ADULT, browserAdult);
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 ctx.startForegroundService(intent);

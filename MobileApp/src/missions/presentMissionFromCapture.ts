@@ -16,6 +16,8 @@ export type PresentMissionOptions = {
   skipNotification?: boolean;
   /** Backend re-presented an existing mission during cooldown. */
   reSurfaced?: boolean;
+  /** Phase B (B6): the R4 adult-site condition held for this capture. */
+  browserAdult?: boolean;
 };
 
 const RESURFACED_BLOCK_PREFIX = 'resurfaced_block_';
@@ -91,7 +93,11 @@ export async function presentMissionFromCapture(
   }
 
   try {
-    await showMissionOverlay({ ...params, metadata: overlayMetadata });
+    await showMissionOverlay({
+      ...params,
+      metadata: overlayMetadata,
+      browserAdult: options?.browserAdult === true,
+    });
     beginMissionCaptureSession(params.missionId, 'overlay');
     clearStaleNotificationMissionLaunch();
     scLog('Mission overlay shown', { missionId: params.missionId });

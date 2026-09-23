@@ -10,6 +10,8 @@ import badgesRoutes from './badges.routes';
 import bonusRoutes from './bonus.routes';
 import customMissionsRoutes from './customMissions.routes';
 import childRoutes from './child.routes';
+import blockedDomainsRoutes from './blockedDomains.routes';
+import browserIncidentsRoutes from './browserIncidents.routes';
 import devRoutes from './dev.routes';
 import debugRoutes from './debug.routes';
 
@@ -38,5 +40,7 @@ router.use('/badges', badgesRoutes);
 router.use('/bonus', bonusRoutes);
 router.use('/custom-missions', customMissionsRoutes);
 router.use('/child', childRoutes);
+router.use('/blocked-domains', blockedDomainsRoutes);
+router.use('/browser-incidents', browserIncidentsRoutes);
 
 export default router;

@@ -1,0 +1,32 @@
+{
+  "neverBlock": [
+    "google.*",
+    "bing.com",
+    "duckduckgo.com",
+    "yahoo.com",
+    "youtube.com",
+    "instagram.com",
+    "facebook.com",
+    "messenger.com",
+    "tiktok.com",
+    "x.com",
+    "twitter.com",
+    "reddit.com",
+    "snapchat.com",
+    "whatsapp.com",
+    "wikipedia.org"
+  ],
+  "exactHostOnly": [
+    "blogspot.com",
+    "tumblr.com",
+    "wordpress.com",
+    "github.io",
+    "netlify.app",
+    "vercel.app",
+    "pages.dev",
+    "web.app",
+    "firebaseapp.com",
+    "herokuapp.com",
+    "sites.google.com"
+  ]
+}

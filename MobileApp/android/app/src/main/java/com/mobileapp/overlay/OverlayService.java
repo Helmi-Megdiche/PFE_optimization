@@ -6,10 +6,13 @@ import android.app.NotificationManager;
 import android.app.Service;
 import android.content.Intent;
 import android.content.pm.ServiceInfo;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
+import android.provider.Browser;
+import android.util.Log;
 import android.view.View;
 import android.view.WindowManager;
 
@@ -24,6 +27,16 @@ import com.mobileapp.R;
 public class OverlayService extends Service {
 
     public static final String ACTION_HIDE = "com.mobileapp.overlay.HIDE";
+    /** Phase B: show the "Inappropriate content" block screen (never over a mission). */
+    public static final String ACTION_SHOW_BLOCK = "com.mobileapp.overlay.SHOW_BLOCK";
+
+    /** Phase B (B6): the mission overlay shows a browser-adult warning line when true. */
+    public static final String EXTRA_BROWSER_ADULT = "browser_adult";
+
+    /** What the current overlay view is. A mission always wins over the block screen. */
+    public static final int KIND_NONE = 0;
+    public static final int KIND_MISSION = 1;
+    public static final int KIND_BLOCK = 2;
 
     public static final String EXTRA_MISSION_ID = "mission_id";
     public static final String EXTRA_TITLE = "title";
@@ -53,6 +66,9 @@ public class OverlayService extends Service {
      */
     @Nullable
     private volatile View overlayView;
+
+    /** Set with {@link #overlayView}, cleared wherever it is nulled. */
+    private volatile int overlayKind = KIND_NONE;
 
     /**
      * ALL_IS_FIXED #46: cancels a pending answer-feedback "advance to next question" callback
@@ -93,7 +109,13 @@ public class OverlayService extends Service {
      * time the overlay is shown over another app).
      */
     public boolean hasActiveOverlayView() {
-        return overlayView != null;
+        // A mission overlay only: the #58 lease backstop asks "is the MISSION still up?", and a
+        // Phase B block screen must never keep a stale mission lease alive.
+        return overlayView != null && overlayKind == KIND_MISSION;
+    }
+
+    public int getOverlayKind() {
+        return overlayView == null ? KIND_NONE : overlayKind;
     }
 
     @Override
@@ -112,6 +134,7 @@ public class OverlayService extends Service {
             stopSelf();
             return START_NOT_STICKY;
         }
+        boolean showBlock = intent != null && ACTION_SHOW_BLOCK.equals(intent.getAction());
 
         Notification notification = buildNotification();
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -123,10 +146,83 @@ public class OverlayService extends Service {
             startForeground(NOTIFICATION_ID, notification);
         }
 
-        if (intent != null) {
+        if (showBlock) {
+            showBlockScreen();
+        } else if (intent != null) {
             showOverlayFromIntent(intent);
         }
         return START_STICKY;
+    }
+
+    /** Phase B block screen. Refused (logged) if a mission overlay is up; replaces an older block screen. */
+    private void showBlockScreen() {
+        Runnable task =
+                () -> {
+                    if (overlayView != null && overlayKind == KIND_MISSION) {
+                        android.util.Log.i("OverlayService", "block screen refused: mission overlay is up");
+                        return;
+                    }
+                    removeOverlayNow();
+                    if (windowManager == null) {
+                        return;
+                    }
+                    OverlayWindowHelper.BlockDismissGate dismissGate =
+                            new OverlayWindowHelper.BlockDismissGate();
+                    Runnable onDismiss =
+                            () ->
+                                    dismissGate.dismiss(
+                                            this::relaunchChromeToBlankTab,
+                                            () -> {
+                                                removeOverlayNow();
+                                                Log.i(
+                                                        "OverlayService",
+                                                        "block screen OK: overlay removed after"
+                                                                + " Chrome relaunch");
+                                                stopForeground(true);
+                                                stopSelf();
+                                            });
+                    View root =
+                            OverlayWindowHelper.attachBlock(
+                                    OverlayService.this, windowManager, onDismiss);
+                    overlayView = root;
+                    overlayKind = root != null ? KIND_BLOCK : KIND_NONE;
+                    if (root == null) {
+                        stopForeground(true);
+                        stopSelf();
+                    }
+                };
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            task.run();
+        } else {
+            mainHandler.post(task);
+        }
+    }
+
+    /**
+     * Phase B (#61). Relaunches Chrome onto a blank tab so the child isn't left staring at the
+     * adult page after OK.
+     *
+     * <p><b>Must run before the overlay is torn down.</b> The BAL (background-activity-launch)
+     * grant this depends on — device-confirmed {@code BAL_ALLOW_NON_APP_VISIBLE_WINDOW}, #61
+     * review r1/r2 A1 — is granted because our overlay window is still the visible non-app
+     * window at the moment {@code startActivity} is called. Remove the overlay first and Android
+     * can silently refuse the launch: the refusal is swallowed by this try/catch (degrading to
+     * today's behaviour, per A3), so the failure would be invisible and the child would be left
+     * on the adult page with no error shown anywhere. Ordering is enforced by
+     * {@link OverlayWindowHelper.BlockDismissGate}, which always calls this before its teardown
+     * {@link Runnable}.
+     */
+    private void relaunchChromeToBlankTab() {
+        try {
+            Intent relaunch = new Intent(Intent.ACTION_VIEW, Uri.parse("about:blank"));
+            relaunch.setPackage("com.android.chrome");
+            relaunch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            relaunch.putExtra(Browser.EXTRA_CREATE_NEW_TAB, true);
+            Log.i("OverlayService", "block screen OK: relaunching Chrome to blank tab");
+            startActivity(relaunch);
+        } catch (Throwable t) {
+            Log.w("OverlayService", "block screen OK: Chrome relaunch failed", t);
+        }
     }
 
     private void showOverlayFromIntent(Intent intent) {
@@ -136,6 +232,7 @@ public class OverlayService extends Service {
         int points = intent.getIntExtra(EXTRA_POINTS, 0);
         String missionType = intent.getStringExtra(EXTRA_MISSION_TYPE);
         String metadataJson = intent.getStringExtra(EXTRA_METADATA_JSON);
+        boolean browserAdult = intent.getBooleanExtra(EXTRA_BROWSER_ADULT, false);
 
         if (missionId == null) {
             return;
@@ -157,6 +254,7 @@ public class OverlayService extends Service {
                                     points,
                                     missionType != null ? missionType : "real_world",
                                     metadataJson != null ? metadataJson : "{}",
+                                    browserAdult,
                                     new OverlayWindowHelper.ActionListener() {
                                         @Override
                                         public void onStartQuiz(
@@ -297,6 +395,7 @@ public class OverlayService extends Service {
                                         }
                                     });
                     overlayView = root;
+                    overlayKind = root != null ? KIND_MISSION : KIND_NONE;
                 };
 
         if (Looper.myLooper() == Looper.getMainLooper()) {
@@ -332,6 +431,7 @@ public class OverlayService extends Service {
             if (windowManager != null && overlayView != null) {
                 OverlayWindowHelper.detach(windowManager, overlayView);
                 overlayView = null;
+overlayKind = KIND_NONE;
             }
             return;
         }
@@ -342,6 +442,7 @@ public class OverlayService extends Service {
                     if (windowManager != null && overlayView != null) {
                         OverlayWindowHelper.detach(windowManager, overlayView);
                         overlayView = null;
+overlayKind = KIND_NONE;
                     }
                 });
     }
@@ -353,6 +454,7 @@ public class OverlayService extends Service {
             if (windowManager != null && overlayView != null) {
                 OverlayWindowHelper.detach(windowManager, overlayView);
                 overlayView = null;
+overlayKind = KIND_NONE;
             }
         } else {
             mainHandler.post(
@@ -362,6 +464,7 @@ public class OverlayService extends Service {
                         if (windowManager != null && overlayView != null) {
                             OverlayWindowHelper.detach(windowManager, overlayView);
                             overlayView = null;
+overlayKind = KIND_NONE;
                         }
                     });
         }

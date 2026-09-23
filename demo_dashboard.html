@@ -427,6 +427,48 @@
       </div>
     </section>
 
+    <section class="bg-white rounded-xl shadow-sm border border-slate-200 p-4 mb-6">
+      <h2 class="text-lg font-semibold mb-1">Blocked sites</h2>
+      <p class="text-xs text-slate-500 mb-4">
+        Adult domains the device has detected and blocked, currently active. Read-only —
+        unblocking is a device-side action, not available from this dashboard.
+      </p>
+      <div class="overflow-x-auto rounded-lg border border-slate-200">
+        <table class="min-w-full text-sm">
+          <thead class="bg-slate-50 text-slate-600">
+            <tr>
+              <th class="px-3 py-2 text-left">Domain</th>
+              <th class="px-3 py-2 text-left">Detected at</th>
+            </tr>
+          </thead>
+          <tbody id="blockedDomainsBody">
+            <tr><td colspan="2" class="px-3 py-4 text-center text-slate-400">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="bg-white rounded-xl shadow-sm border border-slate-200 p-4 mb-6">
+      <h2 class="text-lg font-semibold mb-1">Browser incidents</h2>
+      <p class="text-xs text-slate-500 mb-4">
+        Every time the device sent Chrome back and covered the screen for a blocked site.
+      </p>
+      <div class="overflow-x-auto rounded-lg border border-slate-200">
+        <table class="min-w-full text-sm">
+          <thead class="bg-slate-50 text-slate-600">
+            <tr>
+              <th class="px-3 py-2 text-left">Domain</th>
+              <th class="px-3 py-2 text-left">List</th>
+              <th class="px-3 py-2 text-left">Time</th>
+            </tr>
+          </thead>
+          <tbody id="browserIncidentsBody">
+            <tr><td colspan="3" class="px-3 py-4 text-center text-slate-400">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
     </div><!-- /tabParent -->
 
   </div>
@@ -991,6 +1033,67 @@
         if (!res.ok) throw new Error('Badges: HTTP ' + res.status);
         const data = await res.json();
         return data.badges || [];
+      }
+
+      /** Phase B Task 12 — read-only. */
+      async function fetchBlockedDomains() {
+        const id = childId();
+        const res = await fetchWithAuth(`/blocked-domains/${id}`);
+        if (!res.ok) throw new Error('Blocked domains: HTTP ' + res.status);
+        const data = await res.json();
+        return data.domains || [];
+      }
+
+      async function fetchBrowserIncidents() {
+        const id = childId();
+        const res = await fetchWithAuth(`/browser-incidents/${id}`);
+        if (!res.ok) throw new Error('Browser incidents: HTTP ' + res.status);
+        const data = await res.json();
+        return data.incidents || [];
+      }
+
+      function renderBlockedDomains(domains) {
+        const tbody = $('blockedDomainsBody');
+        if (!domains || !domains.length) {
+          tbody.innerHTML =
+            '<tr><td colspan="2" class="px-3 py-6 text-center text-slate-400">No blocked domains yet.</td></tr>';
+          return;
+        }
+        tbody.innerHTML = domains
+          .map(
+            (d) => `<tr class="hover:bg-slate-50">
+              <td class="px-3 py-2 font-mono text-xs">${escapeHtml(d.domain)}</td>
+              <td class="px-3 py-2 whitespace-nowrap text-xs">${escapeHtml(formatTime(d.detectedAt))}</td>
+            </tr>`,
+          )
+          .join('');
+      }
+
+      function renderBrowserIncidents(incidents) {
+        const tbody = $('browserIncidentsBody');
+        if (!incidents || !incidents.length) {
+          tbody.innerHTML =
+            '<tr><td colspan="3" class="px-3 py-6 text-center text-slate-400">No incidents yet.</td></tr>';
+          return;
+        }
+        tbody.innerHTML = incidents
+          .map(
+            (i) => `<tr class="hover:bg-slate-50">
+              <td class="px-3 py-2 font-mono text-xs">${escapeHtml(i.domain)}</td>
+              <td class="px-3 py-2 text-xs capitalize">${escapeHtml(i.listSource)}</td>
+              <td class="px-3 py-2 whitespace-nowrap text-xs">${escapeHtml(formatTime(i.occurredAt))}</td>
+            </tr>`,
+          )
+          .join('');
+      }
+
+      async function refreshBlockedDomainsPanel() {
+        const [domains, incidents] = await Promise.all([
+          fetchBlockedDomains().catch(() => []),
+          fetchBrowserIncidents().catch(() => []),
+        ]);
+        renderBlockedDomains(domains);
+        renderBrowserIncidents(incidents);
       }
 
       const INTEREST_OPTIONS = [
@@ -1674,6 +1777,7 @@
           renderCustomMissions(customMissions);
           renderLatestScores(latestScore, points);
           renderBadges(badges);
+          await refreshBlockedDomainsPanel();
           await loadInterests();
           $('bonusCurrentPoints').textContent = String(points.totalPoints ?? '—');
           $('cardTotalPoints').textContent = String(points.totalPoints ?? '—');
