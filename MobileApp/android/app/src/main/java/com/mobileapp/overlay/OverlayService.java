@@ -6,10 +6,13 @@ import android.app.NotificationManager;
 import android.app.Service;
 import android.content.Intent;
 import android.content.pm.ServiceInfo;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
+import android.provider.Browser;
+import android.util.Log;
 import android.view.View;
 import android.view.WindowManager;
 
@@ -163,15 +166,24 @@ public class OverlayService extends Service {
                     if (windowManager == null) {
                         return;
                     }
+                    OverlayWindowHelper.BlockDismissGate dismissGate =
+                            new OverlayWindowHelper.BlockDismissGate();
+                    Runnable onDismiss =
+                            () ->
+                                    dismissGate.dismiss(
+                                            this::relaunchChromeToBlankTab,
+                                            () -> {
+                                                removeOverlayNow();
+                                                Log.i(
+                                                        "OverlayService",
+                                                        "block screen OK: overlay removed after"
+                                                                + " Chrome relaunch");
+                                                stopForeground(true);
+                                                stopSelf();
+                                            });
                     View root =
                             OverlayWindowHelper.attachBlock(
-                                    OverlayService.this,
-                                    windowManager,
-                                    () -> {
-                                        removeOverlayNow();
-                                        stopForeground(true);
-                                        stopSelf();
-                                    });
+                                    OverlayService.this, windowManager, onDismiss);
                     overlayView = root;
                     overlayKind = root != null ? KIND_BLOCK : KIND_NONE;
                     if (root == null) {
@@ -183,6 +195,33 @@ public class OverlayService extends Service {
             task.run();
         } else {
             mainHandler.post(task);
+        }
+    }
+
+    /**
+     * Phase B (#61). Relaunches Chrome onto a blank tab so the child isn't left staring at the
+     * adult page after OK.
+     *
+     * <p><b>Must run before the overlay is torn down.</b> The BAL (background-activity-launch)
+     * grant this depends on — device-confirmed {@code BAL_ALLOW_NON_APP_VISIBLE_WINDOW}, #61
+     * review r1/r2 A1 — is granted because our overlay window is still the visible non-app
+     * window at the moment {@code startActivity} is called. Remove the overlay first and Android
+     * can silently refuse the launch: the refusal is swallowed by this try/catch (degrading to
+     * today's behaviour, per A3), so the failure would be invisible and the child would be left
+     * on the adult page with no error shown anywhere. Ordering is enforced by
+     * {@link OverlayWindowHelper.BlockDismissGate}, which always calls this before its teardown
+     * {@link Runnable}.
+     */
+    private void relaunchChromeToBlankTab() {
+        try {
+            Intent relaunch = new Intent(Intent.ACTION_VIEW, Uri.parse("about:blank"));
+            relaunch.setPackage("com.android.chrome");
+            relaunch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            relaunch.putExtra(Browser.EXTRA_CREATE_NEW_TAB, true);
+            Log.i("OverlayService", "block screen OK: relaunching Chrome to blank tab");
+            startActivity(relaunch);
+        } catch (Throwable t) {
+            Log.w("OverlayService", "block screen OK: Chrome relaunch failed", t);
         }
     }
 

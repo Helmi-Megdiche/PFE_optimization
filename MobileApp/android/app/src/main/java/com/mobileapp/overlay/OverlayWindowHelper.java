@@ -262,6 +262,35 @@ public final class OverlayWindowHelper {
     }
   }
 
+  /**
+   * Phase B (#61 review r2, A5): the block screen's Chrome relaunch behind a one-method seam
+   * so the "fires once, before teardown" contract is testable on a plain JVM without
+   * constructing a real {@code android.content.Intent} (untestable outside Robolectric).
+   */
+  public interface ChromeRelaunch {
+    void toBlankTab();
+  }
+
+  /**
+   * Phase B (#61 review r2, A5): guarantees {@link ChromeRelaunch#toBlankTab()} fires at most
+   * once, and always before the caller's teardown {@link Runnable} — pure Java, no
+   * {@code android.*} types, so this invariant is unit-tested independently of the
+   * View/WindowManager code around it. One instance per block-screen attach (see
+   * {@code OverlayService#showBlockScreen()}); not thread-safe, only ever touched from the
+   * main thread there.
+   */
+  public static final class BlockDismissGate {
+    private boolean dismissed;
+
+    public void dismiss(ChromeRelaunch relaunch, Runnable teardown) {
+      if (!dismissed) {
+        dismissed = true;
+        relaunch.toBlankTab();
+      }
+      teardown.run();
+    }
+  }
+
   public static void detach(WindowManager windowManager, View overlayView) {
     if (windowManager == null || overlayView == null) {
       return;
