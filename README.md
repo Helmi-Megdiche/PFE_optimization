@@ -177,7 +177,8 @@ PFE_optimization/
 │   ├── src/                   # capture, hooks, services, missions, screens, native bridges, theme
 │   └── __tests__/             # Jest (517 tests / 37 suites)
 ├── scripts/                   # run-all-tests.ps1, build-adult-list.js
-├── demo_dashboard.html        # Parent dashboard — served at /demo.html
+├── dashboard.html              # Parent dashboard — served at /dashboard.html
+├── demo_dashboard.html        # Legacy debug view — served at /demo.html
 ├── docs/                      # Formal documentation (see below)
 ├── NOTICE                     # Third-party list licence (StevenBlack/hosts, MIT)
 └── README.md

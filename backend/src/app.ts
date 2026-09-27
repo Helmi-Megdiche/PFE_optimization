@@ -29,6 +29,18 @@ export function createApp() {
     });
   });
 
+  /**
+   * DASH-01: the redesigned parent dashboard, same serving shape as /demo.html
+   * above — a single repo-root file, no second copy, same fall-through/no-store
+   * behaviour (ALL_IS_FIXED #5's lesson applied here too).
+   */
+  const dashboardPath = path.resolve(__dirname, '..', '..', 'dashboard.html');
+  app.get('/dashboard.html', (_req, res, next) => {
+    res.sendFile(dashboardPath, { headers: { 'Cache-Control': 'no-store' } }, (err) => {
+      if (err && !res.headersSent) next();
+    });
+  });
+
   app.use(express.static(path.join(__dirname, '..', 'public')));
 
   app.use('/api', apiRoutes);

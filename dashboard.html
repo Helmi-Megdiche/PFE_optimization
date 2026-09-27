@@ -1,0 +1,1610 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>SafeGuard — Parent Dashboard</title>
+<style>
+  :root {
+    --sand: #F4EFE6; --surface: #FFFDFA; --ink: #14302E; --line: #E7DFD1; --divider: #EFE8DB;
+    --muted: #5F6F6B; --muted-2: #93A09B; --teal: #1F6F63; --teal-deep: #16564C; --teal-soft: #E1EFEA;
+    --sage: #2E9E7B; --sage-bg: #DFF1EA; --sage-line: #BFDBD2; --sage-text: #1E6B50;
+    --coral: #E8654A; --coral-deep: #C24328; --coral-darker: #9B2D18; --coral-bg: #FCE9E3; --coral-line: #F3C7BB;
+    --amber: #D9992F; --amber-text: #8A6416; --amber-bg: #F7ECD5; --amber-line: #EAD3A0;
+    --track: #ECE4D6; --input-border: #D8CDB9; --input-bg-alt: #F7F2E9;
+    --side-bg: #14302E; --side-card: #1C3A35; --side-line: #2E5C54; --side-muted: #93B0A9;
+    --side-accent: #5FD3BE; --side-active: #1C3A35; --gold: #E7B85C; --badge-count: #F07A5F;
+    --cat-adult-bg: #FCE9E3; --cat-adult-fg: #9B2D18;
+    --cat-violent-bg: #F7E4D6; --cat-violent-fg: #8A3B18;
+    --cat-gore-bg: #F8E1EA; --cat-gore-fg: #8A1F45;
+    --cat-danger-bg: #F7ECD5; --cat-danger-fg: #8A6416;
+    --cat-edu-bg: #E1EFEA; --cat-edu-fg: #16564C;
+    --cat-neutral-bg: #F2EDE2; --cat-neutral-fg: #5F6F6B;
+    --shadow-card: 0 6px 18px -10px rgba(58,46,26,0.2);
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--sand); color: var(--ink); font-family: "Segoe UI", Roboto, "Helvetica Neue", Helvetica, Arial, sans-serif; -webkit-font-smoothing: antialiased; }
+  a { color: var(--teal); text-decoration: none; }
+  a:hover { color: var(--teal-deep); text-decoration: underline; }
+  button, input { font-family: inherit; }
+  button { cursor: pointer; }
+
+  .app { display: grid; grid-template-columns: 248px minmax(0,1fr); min-height: 100vh; }
+
+  /* ---- Sidebar ---- */
+  .sidebar { background: var(--side-bg); color: var(--sand); display: flex; flex-direction: column; padding: 28px 18px; gap: 24px; }
+  .brand { display: flex; align-items: center; gap: 10px; padding: 0 8px; }
+  .brand-mark { width: 30px; height: 30px; border-radius: 9px; background: var(--side-accent); display: flex; align-items: center; justify-content: center; color: var(--side-bg); font-weight: 800; font-size: 15px; }
+  .brand-name { font-size: 17px; font-weight: 800; letter-spacing: -0.3px; }
+  .child-card { background: var(--side-card); border: 1px solid var(--side-line); border-radius: 14px; padding: 12px; display: flex; align-items: center; gap: 12px; }
+  .child-avatar { width: 38px; height: 38px; border-radius: 999px; background: var(--gold); color: var(--side-bg); display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 15px; flex: none; }
+  .child-name { font-weight: 700; font-size: 14.5px; }
+  .child-meta { font-size: 12.5px; color: var(--side-muted); white-space: nowrap; }
+  .nav { display: flex; flex-direction: column; gap: 4px; }
+  .nav-btn { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 11px 12px; border-radius: 11px; border: 0; cursor: pointer; text-align: left; font-size: 14.5px; font-weight: 600; background: transparent; color: #C9D6D2; }
+  .nav-btn.active { background: var(--side-active); color: var(--side-accent); }
+  .nav-count { min-width: 22px; height: 22px; padding: 0 7px; border-radius: 999px; background: var(--badge-count); color: var(--side-bg); font-size: 12px; font-weight: 800; display: flex; align-items: center; justify-content: center; }
+  .device-status { margin-top: auto; display: flex; flex-direction: column; gap: 6px; padding: 0 8px; }
+  .device-line { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--sand); font-weight: 600; }
+  .device-dot { width: 8px; height: 8px; border-radius: 999px; }
+  .device-dot.on { background: var(--side-accent); box-shadow: 0 0 0 4px rgba(95,211,190,0.18); }
+  .device-dot.off { background: #5C6F6A; }
+  .device-sub { font-size: 12px; color: var(--side-muted); }
+
+  /* ---- Main ---- */
+  .main { padding: 36px 44px 56px; display: flex; flex-direction: column; gap: 28px; max-width: 1180px; width: 100%; }
+  .page-header { display: flex; justify-content: space-between; align-items: flex-end; gap: 24px; flex-wrap: wrap; }
+  .eyebrow { font-size: 11.5px; font-weight: 700; letter-spacing: 1.4px; text-transform: uppercase; color: var(--muted); }
+  .page-title { margin: 0; font-size: 30px; font-weight: 800; letter-spacing: -0.6px; line-height: 1.15; }
+  .subtitle { font-size: 14.5px; color: var(--muted); max-width: 620px; line-height: 1.5; margin-top: 8px; }
+  .header-text { display: flex; flex-direction: column; gap: 8px; }
+
+  .view { display: none; flex-direction: column; gap: 24px; }
+  .view.active { display: flex; }
+
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: 20px; padding: 22px 24px; box-shadow: var(--shadow-card); }
+  .card-dark { background: var(--side-bg); color: var(--sand); border-radius: 20px; padding: 22px; }
+  .section-label { display: flex; align-items: center; gap: 8px; }
+  .section-label .dash { width: 14px; height: 3px; border-radius: 2px; background: var(--teal); }
+  .section-label span.txt { font-size: 11.5px; font-weight: 700; letter-spacing: 1.4px; text-transform: uppercase; color: var(--muted); }
+
+  .grid-2col { display: grid; grid-template-columns: minmax(0,1.7fr) minmax(0,1fr); gap: 20px; align-items: start; }
+  .grid-2col.narrow-left { grid-template-columns: minmax(0,1fr) minmax(0,1.4fr); }
+  .grid-2col.wide-left { grid-template-columns: minmax(0,1.6fr) minmax(0,1fr); }
+  .grid-2col.missions { grid-template-columns: minmax(0,1.5fr) minmax(0,1fr); }
+  @media (max-width: 900px) { .grid-2col { grid-template-columns: 1fr; } }
+
+  .empty { background: var(--sage-bg); border: 1px solid var(--sage-line); border-radius: 18px; padding: 18px 20px; font-size: 14.5px; color: var(--sage-text); font-weight: 600; }
+  .empty.plain { background: var(--input-bg-alt); border: 1px solid var(--line); color: var(--muted); font-weight: 500; }
+
+  .approval-card { background: var(--surface); border: 1px solid var(--line); border-radius: 18px; padding: 18px; display: flex; flex-direction: column; gap: 14px; box-shadow: 0 6px 18px -10px rgba(58,46,26,0.25); }
+  .approval-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+  .approval-eyebrow { font-size: 12px; font-weight: 700; color: var(--amber-text); }
+  .approval-title { font-size: 16px; font-weight: 700; margin-top: 4px; }
+  .approval-desc { font-size: 13.5px; color: var(--muted); line-height: 1.45; margin-top: 4px; }
+  .approval-points { font-size: 14px; font-weight: 800; color: var(--teal); white-space: nowrap; }
+  .approval-actions { display: flex; gap: 8px; }
+  .btn { height: 40px; border-radius: 11px; border: 0; font-size: 14px; font-weight: 700; cursor: pointer; white-space: nowrap; padding: 0 18px; }
+  .btn-primary { background: var(--teal); color: #fff; }
+  .btn-primary:hover { background: var(--teal-deep); }
+  .btn-outline { background: transparent; border: 1px solid var(--input-border); color: var(--ink); font-weight: 600; }
+  .btn-outline:hover { background: #ECE4D6; }
+  .btn-dark { background: var(--side-bg); color: var(--sand); }
+  .btn-accent { background: var(--side-accent); color: var(--side-bg); font-weight: 800; }
+  .btn-sm { height: 32px; padding: 0 12px; font-size: 12.5px; border-radius: 9px; }
+  .btn-danger-text { background: transparent; border: 0; color: var(--muted-2); font-size: 12.5px; font-weight: 700; }
+  .btn-danger-text:hover { color: var(--coral-deep); }
+
+  .escape-card { background: var(--coral-bg); border: 1px solid var(--coral-line); border-radius: 18px; padding: 18px; display: flex; flex-direction: column; gap: 6px; }
+  .escape-eyebrow { font-size: 12px; font-weight: 700; color: var(--coral-darker); }
+  .escape-title { font-size: 16px; font-weight: 700; }
+  .escape-desc { font-size: 13.5px; color: #7A2313; line-height: 1.45; }
+  .cards-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px,1fr)); gap: 14px; }
+
+  .score-block { display: flex; flex-direction: column; gap: 8px; }
+  .score-row { display: flex; justify-content: space-between; align-items: baseline; }
+  .score-row .lbl { font-size: 13.5px; font-weight: 600; color: var(--muted); }
+  .score-row .delta { font-size: 12.5px; font-weight: 700; white-space: nowrap; }
+  .score-num { display: flex; align-items: baseline; gap: 4px; }
+  .score-num .v { font-size: 44px; font-weight: 800; letter-spacing: -1px; font-variant-numeric: tabular-nums; }
+  .score-num .max { font-size: 15px; color: var(--muted-2); font-weight: 600; }
+  .bar-track { height: 8px; border-radius: 99px; background: var(--track); overflow: hidden; }
+  .bar-fill { height: 100%; border-radius: 99px; }
+
+  .week-chart { display: grid; grid-template-columns: repeat(7,minmax(0,1fr)); gap: 10px; align-items: end; border-bottom: 1px solid var(--line); background-image: linear-gradient(var(--divider) 1px,transparent 1px); }
+  .week-col { display: flex; justify-content: center; align-items: flex-end; gap: 4px; height: 100%; }
+  .week-bar { width: 16px; border-radius: 5px 5px 0 0; }
+  .week-labels { display: grid; grid-template-columns: repeat(7,minmax(0,1fr)); gap: 10px; }
+  .week-labels div { text-align: center; font-size: 12px; font-weight: 600; color: var(--muted-2); }
+
+  .flag-row { display: grid; grid-template-columns: 52px minmax(0,1fr) auto; gap: 14px; align-items: center; padding: 12px 0; border-top: 1px solid var(--divider); }
+  .flag-time { font-size: 13px; font-weight: 700; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .flag-appline { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .flag-app { font-size: 14.5px; font-weight: 700; }
+  .flag-preview { font-size: 13px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 4px; }
+  .flag-risk { font-size: 15px; font-weight: 800; font-variant-numeric: tabular-nums; text-align: right; }
+
+  .pill { font-size: 11.5px; font-weight: 700; padding: 3px 9px; border-radius: 999px; white-space: nowrap; }
+  .pill-adult { background: var(--cat-adult-bg); color: var(--cat-adult-fg); }
+  .pill-violent { background: var(--cat-violent-bg); color: var(--cat-violent-fg); }
+  .pill-gore { background: var(--cat-gore-bg); color: var(--cat-gore-fg); }
+  .pill-dangerous_challenge { background: var(--cat-danger-bg); color: var(--cat-danger-fg); }
+  .pill-educational { background: var(--cat-edu-bg); color: var(--cat-edu-fg); }
+  .pill-neutral { background: var(--cat-neutral-bg); color: var(--cat-neutral-fg); }
+  .pill-completed, .pill-approved { background: var(--sage-bg); color: var(--sage-text); }
+  .pill-skipped { background: var(--coral-bg); color: var(--coral-darker); }
+  .pill-expired { background: var(--cat-neutral-bg); color: var(--muted); }
+  .pill-bonus { background: var(--teal-soft); color: var(--teal-deep); }
+
+  .seg { display: flex; gap: 4px; background: #ECE4D6; padding: 3px; border-radius: 999px; }
+  .seg button { border: 0; border-radius: 999px; padding: 6px 13px; font-size: 12.5px; font-weight: 700; cursor: pointer; white-space: nowrap; background: transparent; color: var(--muted); }
+  .seg button.active { background: var(--surface); color: var(--teal-deep); }
+
+  .row-between { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .list-row { display: grid; grid-template-columns: minmax(0,1fr) auto auto; gap: 16px; align-items: center; padding: 13px 0; border-top: 1px solid var(--divider); }
+  .list-row .title { font-size: 14.5px; font-weight: 700; }
+  .list-row .meta { font-size: 12.5px; color: var(--muted-2); margin-top: 3px; }
+  .list-row .pts { font-size: 14px; font-weight: 800; min-width: 56px; text-align: right; font-variant-numeric: tabular-nums; }
+
+  input[type=text], input[type=number] { height: 42px; border-radius: 11px; border: 1px solid var(--input-border); background: var(--surface); padding: 0 12px; font-size: 14px; color: var(--ink); outline: none; }
+  input:focus { border-color: var(--teal); box-shadow: 0 0 0 3px rgba(31,111,99,0.18); }
+  .field { display: flex; flex-direction: column; gap: 6px; }
+  .field .lbl { font-size: 12.5px; font-weight: 600; color: var(--muted); }
+
+  .custom-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 11px 0; border-top: 1px solid var(--divider); }
+  .points-presets { display: flex; gap: 8px; }
+  .preset-btn { flex: 1; height: 36px; border-radius: 10px; font-size: 13px; font-weight: 700; cursor: pointer; white-space: nowrap; border: 1px solid var(--input-border); background: var(--surface); color: var(--muted); }
+  .preset-btn.active { border-color: var(--teal); background: var(--teal-soft); color: var(--teal-deep); }
+  .preset-btn.dark { border-color: var(--side-line); background: transparent; color: var(--sand); }
+  .preset-btn.dark.active { border-color: var(--side-accent); background: var(--side-accent); color: var(--side-bg); }
+
+  .claim-banner { background: var(--amber-bg); border: 1px solid var(--amber-line); border-radius: 18px; padding: 16px 20px; display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; }
+  .claim-eyebrow { font-size: 12px; font-weight: 700; color: var(--amber-text); }
+  .claim-title { font-size: 15.5px; font-weight: 700; margin-top: 3px; }
+
+  .rewards-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px,1fr)); gap: 12px; }
+  .reward-tile { border: 1px solid var(--line); background: var(--input-bg-alt); border-radius: 16px; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+  .reward-tile .t { font-size: 15px; font-weight: 700; }
+  .reward-tile .d { font-size: 12.5px; color: var(--muted); margin-top: 3px; }
+  .reward-progress-row { display: flex; justify-content: space-between; font-size: 12.5px; font-weight: 700; }
+
+  .badge-row { display: flex; gap: 12px; align-items: center; padding: 8px 0; }
+  .badge-icon { width: 40px; height: 40px; border-radius: 12px; background: var(--teal-soft); display: flex; align-items: center; justify-content: center; font-size: 20px; flex: none; }
+  .badge-name { font-size: 14px; font-weight: 700; }
+  .badge-when { font-size: 12.5px; color: var(--muted-2); margin-top: 2px; }
+
+  .incident-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 10px 0; border-top: 1px solid var(--divider); }
+  .incident-host { font-size: 14px; font-weight: 700; word-break: break-all; }
+  .incident-when { font-size: 12.5px; color: var(--muted-2); margin-top: 2px; }
+  .pill-known { background: var(--cat-neutral-bg); color: var(--muted); }
+  .pill-learned { background: var(--amber-bg); color: var(--amber-text); }
+
+  .note-box { background: var(--teal-soft); border: 1px solid var(--sage-line); border-radius: 20px; padding: 20px; display: flex; flex-direction: column; gap: 6px; }
+  .note-box .h { font-size: 14.5px; font-weight: 700; color: var(--teal-deep); }
+  .note-box .p { font-size: 13px; color: var(--teal-deep); line-height: 1.5; }
+
+  .stepper { display: flex; align-items: center; justify-content: space-between; border: 1px solid var(--line); background: var(--input-bg-alt); border-radius: 14px; padding: 10px; }
+  .stepper button { width: 40px; height: 40px; border-radius: 10px; border: 1px solid var(--input-border); background: var(--surface); font-size: 18px; font-weight: 700; color: var(--ink); }
+  .stepper .mid { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+  .stepper .yr { font-size: 26px; font-weight: 800; letter-spacing: -0.5px; font-variant-numeric: tabular-nums; }
+  .stepper .age { font-size: 12.5px; color: var(--muted); font-weight: 600; white-space: nowrap; }
+
+  .interests-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px,1fr)); gap: 10px; }
+  .interest-btn { text-align: left; border-radius: 14px; padding: 14px; cursor: pointer; display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; border: 1.5px solid var(--line); background: var(--surface); }
+  .interest-btn.on { border-color: var(--teal); background: var(--teal-soft); }
+  .interest-btn .text-col { display: flex; flex-direction: column; gap: 3px; }
+  .interest-btn .lbl { display: block; font-size: 14.5px; font-weight: 700; color: var(--ink); }
+  .interest-btn .hint { display: block; font-size: 12.5px; color: var(--muted); }
+  .interest-check { width: 20px; height: 20px; flex: none; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 800; color: #fff; border: 1.5px solid var(--line); background: var(--surface); }
+  .interest-btn.on .interest-check { border-color: var(--teal); background: var(--teal); }
+
+  .mon-inputs { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1.3fr) 120px; gap: 12px; }
+  @media (max-width: 700px) { .mon-inputs { grid-template-columns: 1fr; } }
+  .mon-summary { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 16px; }
+  .mon-summary .tile { background: var(--surface); border: 1px solid var(--line); border-radius: 18px; padding: 18px 20px; display: flex; flex-direction: column; gap: 6px; }
+  .mon-summary .tile .lbl { font-size: 13px; font-weight: 600; color: var(--muted); }
+  .mon-summary .tile .val { font-size: 34px; font-weight: 800; letter-spacing: -0.8px; font-variant-numeric: tabular-nums; }
+  .mon-log-row { display: grid; grid-template-columns: 60px 36px minmax(0,1fr) 30px; gap: 6px; padding: 6px 0; border-bottom: 1px solid var(--side-line); align-items: center; font-family: ui-monospace, Consolas, Menlo, monospace; font-size: 11.5px; }
+  .mon-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .mon-table th { text-align: left; font-size: 11.5px; font-weight: 700; letter-spacing: 0.8px; text-transform: uppercase; color: var(--muted); background: var(--input-bg-alt); padding: 10px 12px; border-top: 1px solid var(--divider); border-bottom: 1px solid var(--divider); }
+  .mon-table td { padding: 11px 12px; border-bottom: 1px solid var(--divider); vertical-align: middle; }
+  .mon-table .num { text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .mon-table .pkg { font-size: 11px; color: var(--muted-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; }
+
+  #toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: var(--side-bg); color: var(--sand); padding: 12px 18px; border-radius: 12px; font-size: 14px; font-weight: 600; box-shadow: 0 10px 24px -12px rgba(20,48,46,0.6); z-index: 50; transition: opacity .2s; }
+  #toast.hidden { display: none; }
+  #banner { border-radius: 12px; padding: 12px 16px; font-size: 13.5px; font-weight: 600; }
+  #banner.err { background: var(--coral-bg); border: 1px solid var(--coral-line); color: var(--coral-darker); }
+  #banner.hidden { display: none; }
+</style>
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">S</div>
+        <div class="brand-name">SafeGuard</div>
+      </div>
+      <div class="child-card">
+        <div class="child-avatar" id="childAvatarLetter">?</div>
+        <div>
+          <div class="child-name" id="sidebarChildName">Loading…</div>
+          <div class="child-meta" id="sidebarChildMeta">—</div>
+        </div>
+      </div>
+      <nav class="nav" id="navList">
+        <button type="button" class="nav-btn active" data-view="today">
+          <span>Today</span><span class="nav-count" id="navCountToday" style="display:none">0</span>
+        </button>
+        <button type="button" class="nav-btn" data-view="missions"><span>Missions</span></button>
+        <button type="button" class="nav-btn" data-view="rewards"><span>Rewards</span></button>
+        <button type="button" class="nav-btn" data-view="safety"><span>Safety</span></button>
+        <button type="button" class="nav-btn" data-view="profile"><span id="navProfileLabel">Profile</span></button>
+        <button type="button" class="nav-btn" data-view="monitoring"><span>Monitoring</span></button>
+      </nav>
+      <div class="device-status">
+        <div class="device-line"><span class="device-dot off" id="deviceDot"></span><span id="deviceStatusText">No activity yet</span></div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="page-header">
+        <div class="header-text">
+          <div class="eyebrow" id="pageEyebrow">Today</div>
+          <h1 class="page-title" id="pageTitle">Today</h1>
+          <div class="subtitle" id="pageSubtitle">Loading…</div>
+        </div>
+      </header>
+
+      <div id="banner" class="hidden"></div>
+
+      <!-- ============ TODAY ============ -->
+      <section class="view active" id="view-today">
+        <section style="display:flex;flex-direction:column;gap:12px">
+          <div class="section-label"><span class="dash"></span><span class="txt">Needs you</span></div>
+          <div id="todayNeedsYou"><p class="empty plain">Loading…</p></div>
+        </section>
+
+        <div class="card" style="display:grid;grid-template-columns:minmax(0,300px) minmax(0,1fr);gap:32px">
+          <div class="score-block">
+            <div style="display:flex;flex-direction:column;gap:22px">
+              <div class="score-block">
+                <div class="score-row"><span class="lbl">Well-being</span><span class="delta" id="wbDelta" style="color:var(--sage-text)"></span></div>
+                <div class="score-num"><span class="v" id="wbScore">—</span><span class="max">/100</span></div>
+                <div class="bar-track"><div class="bar-fill" id="wbBar" style="width:0%;background:var(--sage)"></div></div>
+              </div>
+              <div class="score-block">
+                <div class="score-row"><span class="lbl">Addiction risk</span><span class="delta" id="adLabel" style="color:var(--amber-text)"></span></div>
+                <div class="score-num"><span class="v" id="adScore">—</span><span class="max">/100</span></div>
+                <div class="bar-track"><div class="bar-fill" id="adBar" style="width:0%;background:var(--amber)"></div></div>
+              </div>
+              <div style="font-size:12.5px;color:var(--muted-2);line-height:1.5">Scores are computed each night at 01:00 from screen-time patterns.</div>
+            </div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:14px;min-width:0">
+            <div class="row-between">
+              <div style="font-size:16px;font-weight:700">Last 7 days</div>
+              <div style="display:flex;gap:16px;font-size:12.5px;color:var(--muted);font-weight:600">
+                <span style="display:flex;align-items:center;gap:6px"><span style="width:10px;height:10px;border-radius:3px;background:var(--sage)"></span>Well-being</span>
+                <span style="display:flex;align-items:center;gap:6px"><span style="width:10px;height:10px;border-radius:3px;background:var(--amber)"></span>Addiction risk</span>
+              </div>
+            </div>
+            <div class="week-chart" id="todayWeekChart" style="height:200px"></div>
+            <div class="week-labels" id="todayWeekLabels"></div>
+          </div>
+        </div>
+
+        <div class="grid-2col">
+          <section class="card" style="display:flex;flex-direction:column;gap:6px">
+            <div class="row-between" style="margin-bottom:8px">
+              <div>
+                <div style="font-size:16px;font-weight:700">Flagged today</div>
+                <div style="font-size:13px;color:var(--muted-2)">Only text is shared — screenshots never leave the phone.</div>
+              </div>
+              <button type="button" class="btn-danger-text" data-action="goSafety">See all</button>
+            </div>
+            <div id="todayFlagged"><p class="empty plain">Loading…</p></div>
+          </section>
+          <div style="display:flex;flex-direction:column;gap:20px">
+            <section class="card-dark" style="display:flex;flex-direction:column;gap:14px">
+              <div class="row-between"><span style="font-size:11.5px;font-weight:700;letter-spacing:1.4px;text-transform:uppercase;color:var(--gold)" id="todayLevelBadge">Level —</span><span style="font-size:12.5px;color:var(--side-muted)" id="todayLevelNote">—</span></div>
+              <div style="display:flex;align-items:baseline;gap:6px"><span style="font-size:40px;font-weight:800;letter-spacing:-1px;font-variant-numeric:tabular-nums" id="todayPoints">—</span><span style="color:var(--side-muted);font-weight:600">points</span></div>
+              <div class="bar-track" style="background:#244A44"><div class="bar-fill" id="todayLevelBar" style="width:0%;background:var(--side-accent)"></div></div>
+              <div style="display:flex;gap:18px;font-size:13px;color:var(--side-muted)">
+                <span><b style="color:var(--sand)" id="todayMissionsWeek">0</b> missions in last 7 days</span>
+                <span><b style="color:var(--sand)" id="todayBadgeCount">0</b> badges</span>
+              </div>
+            </section>
+            <section class="card" style="display:flex;flex-direction:column;gap:12px">
+              <div style="font-size:16px;font-weight:700">Browser protection</div>
+              <div style="display:flex;align-items:baseline;gap:8px"><span style="font-size:32px;font-weight:800;letter-spacing:-0.6px" id="todayBrowserCount">0</span><span style="font-size:13.5px;color:var(--muted)">adult sites blocked, last 7 days</span></div>
+              <div style="font-size:13px;color:var(--muted);line-height:1.5" id="todayBrowserNote">—</div>
+              <button type="button" class="btn-danger-text" style="align-self:flex-start;padding:0" data-action="goSafety">View blocked sites</button>
+            </section>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ MISSIONS ============ -->
+      <section class="view" id="view-missions">
+        <div class="grid-2col missions">
+          <section class="card" style="display:flex;flex-direction:column">
+            <div class="row-between" style="margin-bottom:10px">
+              <div style="font-size:16px;font-weight:700">History</div>
+              <div class="seg" id="missionsHistFilters">
+                <button type="button" data-filter="All" class="active">All</button>
+                <button type="button" data-filter="Done">Done</button>
+                <button type="button" data-filter="Missed">Missed</button>
+              </div>
+            </div>
+            <div id="missionsHistoryList"><p class="empty plain">Loading…</p></div>
+          </section>
+          <section class="card" style="display:flex;flex-direction:column;gap:14px">
+            <div>
+              <div style="font-size:16px;font-weight:700">Your own missions</div>
+              <div style="font-size:13px;color:var(--muted);line-height:1.5;margin-top:4px">Added to <span id="missionsChildPossessive">your child's</span> real-world pool, next to the built-in ones.</div>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:8px">
+              <input type="text" id="cmTitleInput" placeholder="e.g. Tidy your room" />
+              <div class="points-presets" id="cmPointsPresets">
+                <button type="button" class="preset-btn" data-pts="10">10 pts</button>
+                <button type="button" class="preset-btn active" data-pts="20">20 pts</button>
+                <button type="button" class="preset-btn" data-pts="30">30 pts</button>
+                <button type="button" class="preset-btn" data-pts="50">50 pts</button>
+              </div>
+              <button type="button" class="btn btn-primary" id="cmAddBtn">Add mission</button>
+            </div>
+            <div id="missionsCustomList"></div>
+          </section>
+        </div>
+      </section>
+
+      <!-- ============ REWARDS ============ -->
+      <section class="view" id="view-rewards">
+        <div id="rewardsClaimedBanner"></div>
+        <div class="grid-2col missions">
+          <section class="card" style="display:flex;flex-direction:column;gap:14px">
+            <div class="row-between" style="align-items:baseline">
+              <div style="font-size:16px;font-weight:700">Reward store</div>
+              <div style="font-size:13px;color:var(--muted)"><span id="rewardsChildHas">Your child has</span> <b style="color:var(--ink)" id="rewardsPointsNote">— pts</b></div>
+            </div>
+            <div class="rewards-grid" id="rewardsStoreGrid"><p class="empty plain">Loading…</p></div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;padding-top:6px;border-top:1px solid var(--divider)">
+              <input type="text" id="rwTitleInput" placeholder="New reward, e.g. Pick the Friday movie" style="flex:1;min-width:200px" />
+              <input type="number" id="rwPointsInput" value="200" min="1" style="width:90px" />
+              <button type="button" class="btn btn-primary" id="rwAddBtn">Add reward</button>
+            </div>
+          </section>
+          <div style="display:flex;flex-direction:column;gap:20px">
+            <section class="card-dark" style="display:flex;flex-direction:column;gap:14px">
+              <div>
+                <div style="font-size:16px;font-weight:700">Give bonus points</div>
+                <div style="font-size:13px;color:var(--side-muted);margin-top:4px">Recognise something good she or he did offline.</div>
+              </div>
+              <div class="points-presets" id="bonusPresets">
+                <button type="button" class="preset-btn dark" data-bonus="5">+5</button>
+                <button type="button" class="preset-btn dark active" data-bonus="10">+10</button>
+                <button type="button" class="preset-btn dark" data-bonus="25">+25</button>
+              </div>
+              <input type="text" id="bonusReasonInput" placeholder="Reason (they'll see it)" style="background:#1C3A35;border-color:#2E5C54;color:var(--sand)" />
+              <button type="button" class="btn btn-accent" id="bonusSendBtn">Send 10 points</button>
+            </section>
+            <section class="card" style="display:flex;flex-direction:column;gap:12px">
+              <div class="row-between" style="align-items:baseline">
+                <div style="font-size:16px;font-weight:700">Badges</div>
+                <span style="font-size:12.5px;color:var(--muted-2)" id="badgesCount">— of — earned</span>
+              </div>
+              <div id="badgesList"><p class="empty plain">Loading…</p></div>
+            </section>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ SAFETY ============ -->
+      <section class="view" id="view-safety">
+        <div class="grid-2col wide-left">
+          <section class="card" style="display:flex;flex-direction:column">
+            <div class="row-between" style="margin-bottom:10px">
+              <div>
+                <div style="font-size:16px;font-weight:700">Screen activity · today</div>
+                <div style="font-size:13px;color:var(--muted-2)">Text read on screen, scored on the device.</div>
+              </div>
+              <div class="seg" id="safetyFilters">
+                <button type="button" data-filter="Flagged" class="active">Flagged</button>
+                <button type="button" data-filter="All">All</button>
+              </div>
+            </div>
+            <div id="safetyEventsList"><p class="empty plain">Loading…</p></div>
+          </section>
+          <div style="display:flex;flex-direction:column;gap:20px">
+            <section class="card" style="display:flex;flex-direction:column">
+              <div style="font-size:16px;font-weight:700;margin-bottom:4px">Blocked in Chrome</div>
+              <div style="font-size:13px;color:var(--muted-2);margin-bottom:10px">Only the site's address is shared, never the page.</div>
+              <div id="safetyIncidentsList"><p class="empty plain">Loading…</p></div>
+            </section>
+            <div class="note-box">
+              <!-- 76,774 verified against the actual shipped file, not copied from the design:
+                   MobileApp/android/app/src/main/assets/adult_domains.txt, `grep -c '^[a-z0-9]'` = 76774. -->
+              <div class="h" id="safetyStaticNoteTitle">76,774 known adult sites are blocked by default</div>
+              <div class="p">New ones are learned on the phone when the image model detects adult content. Unblocking can only be done on the device.</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ PROFILE ============ -->
+      <section class="view" id="view-profile">
+        <div class="grid-2col narrow-left">
+          <section class="card" style="display:flex;flex-direction:column;gap:16px">
+            <div>
+              <div style="font-size:16px;font-weight:700">Age</div>
+              <div style="font-size:13px;color:var(--muted);line-height:1.5;margin-top:4px">Sets mission difficulty, screen-time caps and age badges.</div>
+            </div>
+            <div class="stepper">
+              <button type="button" id="profileYearDown">−</button>
+              <div class="mid">
+                <span class="yr" id="profileBirthYear">—</span>
+                <span class="age" id="profileAgeLine">Born in · — years old</span>
+              </div>
+              <button type="button" id="profileYearUp">+</button>
+            </div>
+            <div style="font-size:12.5px;color:var(--muted-2)" id="profileSaveNote">Changes save automatically.</div>
+          </section>
+          <section class="card" style="display:flex;flex-direction:column;gap:16px">
+            <div>
+              <div style="font-size:16px;font-weight:700">Interests</div>
+              <div style="font-size:13px;color:var(--muted);line-height:1.5;margin-top:4px">Missions lean toward what they like. Pick any.</div>
+            </div>
+            <div class="interests-grid" id="profileInterestsGrid"></div>
+          </section>
+        </div>
+      </section>
+
+      <!-- ============ MONITORING ============ -->
+      <section class="view" id="view-monitoring">
+        <section class="card" style="display:flex;flex-direction:column;gap:16px;padding:20px 22px">
+          <div class="row-between">
+            <div class="section-label"><span class="dash"></span><span class="txt">Connection</span></div>
+            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+              <span style="display:flex;align-items:center;gap:7px;font-size:12.5px;font-weight:600;color:var(--muted)"><span id="monDot" style="width:8px;height:8px;border-radius:99px;background:var(--sage);display:inline-block"></span><span id="monStatusLine">Auto-refresh every 10 s</span></span>
+              <button type="button" class="btn btn-primary btn-sm" id="monRefreshBtn">Refresh now</button>
+              <button type="button" class="btn btn-outline btn-sm" id="monAutoBtn">Stop auto-refresh</button>
+            </div>
+          </div>
+          <div class="mon-inputs">
+            <label class="field"><span class="lbl">API base URL</span><input type="text" id="monApiBase" value="http://localhost:3000" /></label>
+            <label class="field"><span class="lbl">Child ID (seed)</span><input type="text" id="monChildId" style="font-family:ui-monospace,Consolas,Menlo,monospace;font-size:13px" /></label>
+            <label class="field"><span class="lbl">Events limit</span><input type="number" id="monEventsLimit" value="20" min="1" max="100" /></label>
+          </div>
+          <div style="font-size:12.5px;color:var(--muted-2)">Uses <code style="font-family:ui-monospace,Consolas,Menlo,monospace;background:var(--input-bg-alt);padding:1px 6px;border-radius:5px;color:var(--muted)">GET /api/dev/parent-token</code> then the parent JWT for screen events and scores.</div>
+        </section>
+
+        <div class="mon-summary">
+          <div class="tile"><span class="lbl">Events today</span><span class="val" id="monEventsToday">—</span></div>
+          <div class="tile"><span class="lbl">Avg combined risk (today)</span><span class="val" id="monAvgRisk">—</span></div>
+          <div class="tile"><span class="lbl">Top category (today)</span><span class="val" id="monTopCategory">—</span></div>
+        </div>
+
+        <div class="grid-2col" style="grid-template-columns:minmax(0,1fr) 340px">
+          <section class="card" style="display:flex;flex-direction:column;gap:12px;padding:20px 22px">
+            <div class="row-between">
+              <div style="font-size:16px;font-weight:700">Daily scores · last 7 days</div>
+              <div style="display:flex;gap:16px;font-size:12.5px;color:var(--muted);font-weight:600">
+                <span style="display:flex;align-items:center;gap:6px"><span style="width:10px;height:10px;border-radius:3px;background:var(--sage)"></span>Well-being</span>
+                <span style="display:flex;align-items:center;gap:6px"><span style="width:10px;height:10px;border-radius:3px;background:var(--amber)"></span>Addiction</span>
+              </div>
+            </div>
+            <div class="week-chart" id="monWeekChart" style="height:180px"></div>
+            <div class="week-labels" id="monWeekLabels"></div>
+          </section>
+          <section class="card-dark" style="display:flex;flex-direction:column;gap:12px;padding:20px">
+            <div class="row-between" style="align-items:baseline"><div style="font-size:16px;font-weight:700">API activity</div><span style="font-size:12px;color:var(--side-muted)">last 5 min</span></div>
+            <!-- Bounded + scrollable, matching demo_dashboard.html's #activityLog (max-h-96
+                 overflow-y-auto) — without this the log grows with the page instead of the
+                 page growing around a fixed-height log, same "last 5 min" window as before. -->
+            <div id="monActivityLog" style="display:flex;flex-direction:column;gap:2px;max-height:384px;overflow-y:auto"></div>
+          </section>
+        </div>
+
+        <section class="card" style="padding:20px 0 8px;display:flex;flex-direction:column">
+          <div class="row-between" style="padding:0 22px 12px;align-items:baseline">
+            <div style="font-size:16px;font-weight:700">Recent screen events</div>
+            <span style="font-size:12.5px;color:var(--muted-2)">OCR × 0.3 + vision × 0.7 = combined</span>
+          </div>
+          <div style="overflow-x:auto;padding:0 22px">
+            <table class="mon-table">
+              <thead><tr><th>Time</th><th>App</th><th>Preview</th><th style="text-align:right">Risk</th><th style="text-align:right">Combined</th><th>Category</th><th>Image labels</th></tr></thead>
+              <tbody id="monEventsTable"><tr><td colspan="7" style="text-align:center;color:var(--muted-2)">Loading…</td></tr></tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <div id="toast" class="hidden"></div>
+
+<script>
+(function () {
+  'use strict';
+
+  /* ============================================================
+   * Config
+   * ========================================================== */
+  var DEFAULT_CHILD = '33333333-3333-3333-3333-333333333333';
+  var REFRESH_MS = 10000;
+  var NOTIFY_MS = 30000;
+  var LOG_WINDOW_MS = 5 * 60 * 1000;
+  var AGGREGATE_EVENTS_LIMIT = 100; // events fetched for Today/Safety weekly-style aggregates,
+                                     // independent of Monitoring's own user-configurable limit.
+  // Distinct from demo_dashboard.html's own notify key so the two pages don't clobber
+  // each other's "already notified" state if both are open at once.
+  var NOTIFY_STORAGE_KEY = 'pfe_dashboard2_notify_seen';
+
+  var CAT_LABEL = {
+    adult: 'Adult', violent: 'Violent', gore: 'Gore',
+    dangerous_challenge: 'Dangerous challenge', educational: 'Educational', neutral: 'Neutral',
+  };
+
+  var state = {
+    apiBase: 'http://localhost:3000',
+    childId: DEFAULT_CHILD,
+    monLimit: 20,
+    view: 'today',
+    parentToken: null,
+    autoRefresh: true,
+    histFilter: 'All',
+    evFilter: 'Flagged',
+    cmPoints: 20,
+    bonusSel: 10,
+    monAgo: 0,
+    // fetched data
+    profile: { displayName: null, birthYear: null },
+    totalPoints: 0,
+    missions: { pending: [], pendingApproval: [], completed: [], expired: [], failed: [] },
+    rewards: [],
+    badgesChild: [],
+    badgesAllCount: 0,
+    scoreLatest: null,
+    scoreTrend: [],
+    events: [],       // AGGREGATE_EVENTS_LIMIT-sized, used by Today/Safety
+    monEvents: [],     // monLimit-sized, used by Monitoring's table only
+    incidents: [],
+    customMissions: [],
+  };
+
+  var activityEntries = [];
+  var refreshTimer = null;
+  var notifyTimer = null;
+  var toastTimer = null;
+  var lastNotifySnapshot = null;
+
+  function $(id) { return document.getElementById(id); }
+
+  /* ============================================================
+   * Small helpers (verbatim style from demo_dashboard.html)
+   * ========================================================== */
+  function escapeHtml(s) {
+    if (!s) return '';
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+  function truncate(s, n) {
+    if (!s) return '';
+    return s.length <= n ? s : s.slice(0, n) + '…';
+  }
+  function formatTime(iso) {
+    try { return new Date(iso).toLocaleString(); } catch (e) { return iso; }
+  }
+  function isToday(iso) {
+    var d = new Date(iso), now = new Date();
+    return d.toDateString() === now.toDateString();
+  }
+  function isWithinDays(iso, days) {
+    var t = new Date(iso).getTime();
+    return t >= Date.now() - days * 24 * 60 * 60 * 1000;
+  }
+  function riskColor(r) {
+    return r >= 70 ? '#C24328' : r >= 50 ? '#B7791F' : '#2E9E7B';
+  }
+  function catPillClass(cat) {
+    return 'pill pill-' + (cat && CAT_LABEL[cat] ? cat : 'neutral');
+  }
+  function catLabel(cat) { return CAT_LABEL[cat] || 'Neutral'; }
+  function childName() { return state.profile.displayName || 'your child'; }
+  function childPossessive() {
+    var n = state.profile.displayName;
+    if (!n) return "your child's";
+    return n + (n.slice(-1).toLowerCase() === 's' ? "'" : "'s");
+  }
+
+  function showToast(msg) {
+    var el = $('toast');
+    el.textContent = msg;
+    el.classList.remove('hidden');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { el.classList.add('hidden'); }, 2600);
+  }
+  function showBanner(msg) {
+    var el = $('banner');
+    el.className = 'err';
+    el.textContent = msg;
+  }
+  function hideBanner() {
+    $('banner').className = 'hidden';
+  }
+
+  /* ============================================================
+   * imageLabels — copied verbatim from demo_dashboard.html so the
+   * two dashboards read the same on-device classifier payload the
+   * same way.
+   * ========================================================== */
+  function imageLabels(details) {
+    if (!details || typeof details !== 'object') return '—';
+    var parts = [];
+    var tflite = details.tfliteOutputs;
+    if (Array.isArray(tflite) && tflite.length >= 2) {
+      var nsfwPct = Math.round((tflite[1] || 0) * 100);
+      parts.push('TFLite-NSFW:' + nsfwPct + '%');
+    } else if (details.nsfwProbabilities && details.nsfwProbabilities.porn != null) {
+      parts.push('TFLite-NSFW:' + Math.round(details.nsfwProbabilities.porn * 100) + '%');
+    }
+    var labels = details.mlKitLabels;
+    if (Array.isArray(labels) && labels.length) {
+      parts.push(labels.slice(0, 3).map(function (l) {
+        return (l.text || l.label || '?') + ':' + (l.confidence || 0).toFixed(2);
+      }).join(', '));
+    }
+    if (parts.length) return parts.join(' · ');
+    if (details.source === 'mock' && details.mockHint) return 'mock:' + details.mockHint;
+    return details.source || '—';
+  }
+
+  var ATTENTION_WINDOW_DAYS = 1; // 24h — see recentEscapes() below.
+
+  /**
+   * Skipped/escaped missions with a penalty. "Needs you" (Today's cards + the sidebar
+   * count) only surfaces the recent ones — a skip from weeks ago no longer needs a
+   * decision, and without a window "All caught up" is never reachable once any skip
+   * has ever happened. Missions history is NOT filtered by this — it shows every skip
+   * ever, this window only bounds what counts as currently needing attention.
+   */
+  function recentEscapes() {
+    return state.missions.failed.filter(function (m) {
+      return (m.penaltyApplied || 0) > 0 && isWithinDays(m.escapedAt || m.createdAt, ATTENTION_WINDOW_DAYS);
+    });
+  }
+
+  /* ============================================================
+   * Mission label helpers — computed from triggerReason + metadata,
+   * per DASH-01 Gate 1 (no free-text "reason" column exists on
+   * `missions`; trigger_reason is a short enum, metadata.triggerCategory
+   * is the risk category at generation time — missionGenerator.ts:530).
+   * ========================================================== */
+  function triggerLabel(m) {
+    var reason = m.triggerReason;
+    var cat = (m.metadata && m.metadata.triggerCategory) || null;
+    if (reason === 'bonus') return null; // bonus rows show their own reason text instead
+    if (reason === 'high_addiction') return 'High screen time';
+    if (reason === 'low_wellbeing') return 'Low well-being';
+    if (reason === 'risky_content') {
+      if (cat === 'adult') return 'Adult site';
+      if (cat === 'violent') return 'Violent content';
+      if (cat === 'gore') return 'Graphic content';
+      if (cat === 'dangerous_challenge') return 'Risky challenge';
+      return 'Flagged content';
+    }
+    return 'A mission was skipped'; // generic fallback — never implies knowing why
+  }
+
+  function kindLabel(m) {
+    var t = m.metadata && m.metadata.type;
+    if (m.triggerReason === 'bonus') return 'Bonus';
+    if (t === 'quiz') return 'Quiz';
+    if (t === 'minigame' || t === 'cognitive') return 'Game';
+    return 'Real-world';
+  }
+
+  function statusLabel(m) {
+    if (m.status === 'completed') return 'Completed';
+    if (m.status === 'expired') return 'Expired';
+    if (m.status === 'failed') return 'Skipped';
+    return m.status;
+  }
+  function statusPillClass(label) {
+    return 'pill pill-' + label.toLowerCase();
+  }
+
+  function missionPointsDisplay(m) {
+    if (m.status === 'failed') {
+      var pen = m.penaltyApplied || 0;
+      return { text: pen ? '−' + pen : '—', color: pen ? 'var(--coral-deep)' : 'var(--muted-2)' };
+    }
+    if (m.status === 'completed') {
+      return { text: '+' + m.points, color: 'var(--teal)' };
+    }
+    return { text: '—', color: 'var(--muted-2)' };
+  }
+
+  /**
+   * getChildLevel, copied verbatim as a fallback only — the canonical
+   * formula lives server-side at backend/src/services/gamificationService.ts:144-147
+   * (`Math.floor(Math.max(0, Math.floor(totalPoints)) / 500) + 1`). GET /api/scores/:childId
+   * already returns a computed `level` field using that exact function — this copy is
+   * only used when there is no daily score yet (404) so no `level` field is available.
+   */
+  function computeLevelFallback(totalPoints) {
+    var points = Math.max(0, Math.floor(totalPoints || 0));
+    return Math.floor(points / 500) + 1;
+  }
+
+  function addictionBucket(score) {
+    if (score == null) return { label: '—', color: 'var(--muted-2)' };
+    if (score >= 70) return { label: 'High', color: 'var(--coral-deep)' };
+    if (score >= 30) return { label: 'Moderate', color: 'var(--amber-text)' };
+    return { label: 'Low', color: 'var(--sage-text)' };
+  }
+
+  /* ============================================================
+   * API layer — same shape as demo_dashboard.html's fetchWithAuth:
+   * in-memory token only, minted via /api/dev/parent-token, retried
+   * once on 401. No localStorage involved in auth at all.
+   * ========================================================== */
+  function apiFetch(path, options) {
+    options = options || {};
+    var url = state.apiBase.replace(/\/$/, '') + '/api' + path;
+    var headers = Object.assign({ Accept: 'application/json' }, options.headers || {});
+    return fetch(url, Object.assign({}, options, { headers: headers })).then(function (res) {
+      logActivity(options.method || 'GET', path, res.status, res.ok ? 'OK' : res.statusText);
+      return res;
+    });
+  }
+
+  function ensureParentToken() {
+    return apiFetch('/dev/parent-token').then(function (res) {
+      if (!res.ok) throw new Error('Parent token failed: HTTP ' + res.status);
+      return res.json();
+    }).then(function (data) {
+      state.parentToken = data.token;
+      if (!state.parentToken) throw new Error('No token in parent-token response');
+      return state.parentToken;
+    });
+  }
+
+  function fetchWithAuth(path, options) {
+    options = options || {};
+    function authed() {
+      return apiFetch(path, Object.assign({}, options, {
+        headers: Object.assign({ Authorization: 'Bearer ' + state.parentToken }, options.headers || {}),
+      }));
+    }
+    var chain = state.parentToken ? Promise.resolve() : ensureParentToken();
+    return chain.then(authed).then(function (res) {
+      if (res.status === 401) {
+        state.parentToken = null;
+        return ensureParentToken().then(authed);
+      }
+      return res;
+    });
+  }
+
+  function logActivity(method, path, status, detail) {
+    activityEntries.unshift({ at: Date.now(), method: method, path: path, status: status, detail: detail || '' });
+    var cutoff = Date.now() - LOG_WINDOW_MS;
+    while (activityEntries.length && activityEntries[activityEntries.length - 1].at < cutoff) activityEntries.pop();
+  }
+
+  /* ---- data fetchers ---- */
+  function fetchChildProfile() {
+    return fetchWithAuth('/child/profile/' + state.childId).then(function (res) {
+      if (!res.ok) throw new Error('Profile HTTP ' + res.status);
+      return res.json();
+    });
+  }
+  function fetchChildPoints() {
+    return fetchWithAuth('/missions/child/' + state.childId + '/points').then(function (res) {
+      if (!res.ok) throw new Error('Points HTTP ' + res.status);
+      return res.json();
+    });
+  }
+  function fetchMissions() {
+    return fetchWithAuth('/missions/child/' + state.childId).then(function (res) {
+      if (!res.ok) throw new Error('Missions HTTP ' + res.status);
+      return res.json();
+    });
+  }
+  function fetchRewards() {
+    return fetchWithAuth('/rewards').then(function (res) {
+      if (!res.ok) throw new Error('Rewards HTTP ' + res.status);
+      return res.json();
+    }).then(function (d) { return d.rewards || []; });
+  }
+  function fetchChildBadges() {
+    return fetchWithAuth('/badges/child/' + state.childId).then(function (res) {
+      if (!res.ok) throw new Error('Badges HTTP ' + res.status);
+      return res.json();
+    }).then(function (d) { return d.badges || []; });
+  }
+  function fetchAllBadgesCount() {
+    return fetchWithAuth('/badges?childId=' + encodeURIComponent(state.childId)).then(function (res) {
+      if (!res.ok) throw new Error('All badges HTTP ' + res.status);
+      return res.json();
+    }).then(function (d) { return (d.badges || []).length; });
+  }
+  function fetchLatestScore() {
+    return fetchWithAuth('/scores/' + state.childId).then(function (res) {
+      if (res.status === 404) return null;
+      if (!res.ok) throw new Error('Latest score HTTP ' + res.status);
+      return res.json();
+    });
+  }
+  function fetchScoresTrend() {
+    return fetchWithAuth('/scores/' + state.childId + '/trend?days=7').then(function (res) {
+      if (res.status === 404) return [];
+      if (!res.ok) throw new Error('Trend HTTP ' + res.status);
+      return res.json();
+    }).then(function (d) { return d.scores || []; });
+  }
+  function fetchScreenEvents(limit) {
+    return fetchWithAuth('/screen-events/' + state.childId + '?limit=' + limit).then(function (res) {
+      if (!res.ok) throw new Error('Screen events HTTP ' + res.status);
+      return res.json();
+    }).then(function (d) { return d.events || []; });
+  }
+  function fetchBrowserIncidents(limit) {
+    return fetchWithAuth('/browser-incidents/' + state.childId + '?limit=' + limit).then(function (res) {
+      if (!res.ok) throw new Error('Browser incidents HTTP ' + res.status);
+      return res.json();
+    }).then(function (d) { return d.incidents || []; });
+  }
+  function fetchCustomMissions() {
+    return fetchWithAuth('/custom-missions').then(function (res) {
+      if (!res.ok) throw new Error('Custom missions HTTP ' + res.status);
+      return res.json();
+    }).then(function (d) { return d.missions || []; });
+  }
+
+  /* ============================================================
+   * Sidebar
+   * ========================================================== */
+  var VIEW_HEAD = {
+    today: function () {
+      var todo = state.missions.pendingApproval.length + recentEscapes().length;
+      var flaggedCount = state.events.filter(function (e) { return isToday(e.timestamp) && e.combinedRiskScore != null && e.combinedRiskScore >= 50; }).length;
+      var sub = todo
+        ? todo + ' thing' + (todo > 1 ? 's' : '') + ' need' + (todo > 1 ? '' : 's') + ' your attention.'
+        : 'You are all caught up.';
+      if (flaggedCount) sub += ' ' + flaggedCount + ' moment' + (flaggedCount > 1 ? 's were' : ' was') + ' flagged today.';
+      return ['Today', 'A look at ' + childName() + "'s day.", sub];
+    },
+    missions: function () { return ['Missions', 'What they did, and what you asked for.', 'Missions start on their own when risky content or unhealthy usage shows up. You can add your own real-world ones too.']; },
+    rewards: function () { return ['Rewards', 'Turn points into things they care about.', 'They earn points from missions and spend them here. You decide what is in the store.']; },
+    safety: function () { return ['Safety', 'What SafeGuard saw and stopped.', 'Screenshots are analysed on the phone and deleted. Only short text and scores reach you.']; },
+    profile: function () { return [childPossessive() + ' profile', 'Help SafeGuard fit ' + childName() + '.', 'Age and interests shape which missions they get and how hard they are.']; },
+    monitoring: function () { return ['Monitoring', 'Live pipeline, straight from the device.', 'Raw screen events, OCR vs combined risk, image labels and every API call — for checking the on-device AI during the demo.']; },
+  };
+
+  function renderSidebar() {
+    var name = state.profile.displayName;
+    $('sidebarChildName').textContent = name || 'Loading…';
+    $('childAvatarLetter').textContent = name ? name.charAt(0).toUpperCase() : '?';
+    var age = state.profile.birthYear != null ? (new Date().getFullYear() - state.profile.birthYear) : null;
+    var level = currentLevel();
+    var metaParts = [];
+    if (age != null) metaParts.push(age + ' years');
+    metaParts.push('Level ' + level);
+    $('sidebarChildMeta').textContent = metaParts.join(' · ');
+
+    var todo = state.missions.pendingApproval.length + recentEscapes().length;
+    var badge = $('navCountToday');
+    if (todo > 0) { badge.style.display = 'flex'; badge.textContent = String(todo); }
+    else { badge.style.display = 'none'; }
+
+    $('navProfileLabel').textContent = childPossessive() + ' profile';
+
+    document.querySelectorAll('.nav-btn').forEach(function (btn) {
+      btn.classList.toggle('active', btn.getAttribute('data-view') === state.view);
+    });
+
+    // Device status — no device metadata ever reaches the backend (privacy model), so this
+    // is a proxy off the freshest screen event only. Never claims "connected"/"synced".
+    var latest = state.events[0];
+    var dot = $('deviceDot');
+    var text = $('deviceStatusText');
+    if (!latest) {
+      dot.className = 'device-dot off';
+      text.textContent = 'No activity yet';
+    } else {
+      var recent = isWithinDays(latest.timestamp, 1);
+      dot.className = 'device-dot ' + (recent ? 'on' : 'off');
+      text.textContent = 'Last activity: ' + formatTime(latest.timestamp);
+    }
+  }
+
+  function currentLevel() {
+    if (state.scoreLatest && state.scoreLatest.level != null) return state.scoreLatest.level;
+    return computeLevelFallback(state.totalPoints);
+  }
+
+  function renderHeader() {
+    var head = VIEW_HEAD[state.view]();
+    $('pageEyebrow').textContent = state.view === 'today' ? new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' }) : head[0];
+    $('pageTitle').textContent = head[0];
+    $('pageSubtitle').textContent = head[2];
+  }
+
+  /* ============================================================
+   * View switching — all six views exist in the DOM at all times;
+   * switching just toggles visibility so form inputs (custom mission
+   * title, reward fields, Monitoring's connection panel) never lose
+   * focus or typed text on the 10s auto-refresh.
+   * ========================================================== */
+  function switchView(name) {
+    state.view = name;
+    document.querySelectorAll('.view').forEach(function (v) { v.classList.toggle('active', v.id === 'view-' + name); });
+    renderHeader();
+    renderSidebar();
+  }
+
+  document.querySelectorAll('.nav-btn').forEach(function (btn) {
+    btn.addEventListener('click', function () { switchView(btn.getAttribute('data-view')); });
+  });
+  document.querySelectorAll('[data-action="goSafety"]').forEach(function (btn) {
+    btn.addEventListener('click', function () { switchView('safety'); });
+  });
+
+  /* ============================================================
+   * TODAY
+   * ========================================================== */
+  function renderToday() {
+    var pendingApproval = state.missions.pendingApproval;
+    var escapes = recentEscapes();
+
+    var needsYou = $('todayNeedsYou');
+    if (!pendingApproval.length && !escapes.length) {
+      needsYou.innerHTML = '<div class="empty">You\'re all caught up. Nothing needs a decision right now.</div>';
+    } else {
+      var html = '<div class="cards-grid">';
+      pendingApproval.forEach(function (m) {
+        html += '<div class="approval-card">' +
+          '<div class="approval-top"><div><div class="approval-eyebrow">Waiting for approval · ' + escapeHtml(formatTime(m.createdAt)) + '</div>' +
+          '<div class="approval-title">' + escapeHtml(m.title) + '</div>' +
+          '<div class="approval-desc">' + escapeHtml(m.description) + '</div></div>' +
+          '<div class="approval-points">+' + m.points + ' pts</div></div>' +
+          '<div class="approval-actions">' +
+          '<button type="button" class="btn btn-primary" style="flex:1" data-action="approve" data-id="' + m.id + '">Approve</button>' +
+          '<button type="button" class="btn btn-outline" data-action="reject" data-id="' + m.id + '">Not done</button>' +
+          '</div></div>';
+      });
+      escapes.forEach(function (m) {
+        var label = triggerLabel(m) || 'A mission was skipped';
+        html += '<div class="escape-card">' +
+          '<div class="escape-eyebrow">Mission skipped · ' + escapeHtml(formatTime(m.escapedAt || m.createdAt)) + '</div>' +
+          '<div class="escape-title">' + escapeHtml(m.title) + '</div>' +
+          '<div class="escape-desc">' + escapeHtml(label) + '. ' + (m.penaltyApplied || 0) + ' points were deducted.</div>' +
+          '</div>';
+      });
+      html += '</div>';
+      needsYou.innerHTML = html;
+      needsYou.querySelectorAll('[data-action="approve"]').forEach(function (btn) {
+        btn.addEventListener('click', function () { approveMission(btn.getAttribute('data-id')); });
+      });
+      needsYou.querySelectorAll('[data-action="reject"]').forEach(function (btn) {
+        btn.addEventListener('click', function () { rejectMission(btn.getAttribute('data-id')); });
+      });
+    }
+
+    // Scores
+    var latest = state.scoreLatest;
+    var wb = latest ? latest.wellbeingScore : null;
+    var ad = latest ? latest.addictionScore : null;
+    $('wbScore').textContent = wb != null ? wb : '—';
+    $('wbBar').style.width = (wb || 0) + '%';
+    $('adScore').textContent = ad != null ? ad : '—';
+    $('adBar').style.width = (ad || 0) + '%';
+    var bucket = addictionBucket(ad);
+    $('adLabel').textContent = bucket.label;
+    $('adLabel').style.color = bucket.color;
+
+    var trend = state.scoreTrend;
+    if (trend.length >= 2 && wb != null) {
+      var delta = wb - trend[0].wellbeingScore;
+      var deltaEl = $('wbDelta');
+      deltaEl.style.display = '';
+      deltaEl.textContent = (delta > 0 ? '+' : '') + delta + ' vs 7 days ago';
+      deltaEl.style.color = delta >= 0 ? 'var(--sage-text)' : 'var(--coral-deep)';
+    } else {
+      $('wbDelta').style.display = 'none';
+    }
+
+    renderWeekChart('todayWeekChart', 'todayWeekLabels', trend, 2);
+
+    // Flagged today (no outcome column — no field links a screen_event row to a mission)
+    var flagged = state.events.filter(function (e) { return isToday(e.timestamp) && e.combinedRiskScore != null && e.combinedRiskScore >= 50; });
+    var flagEl = $('todayFlagged');
+    if (!flagged.length) {
+      flagEl.innerHTML = '<p class="empty plain">No risky moments today.</p>';
+    } else {
+      flagEl.innerHTML = flagged.map(function (e) {
+        var r = e.combinedRiskScore;
+        return '<div class="flag-row">' +
+          '<div class="flag-time">' + escapeHtml(new Date(e.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })) + '</div>' +
+          '<div><div class="flag-appline"><span class="flag-app">' + escapeHtml(e.appLabel || e.appPackage || 'unknown') + '</span>' +
+          '<span class="' + catPillClass(e.category) + '">' + catLabel(e.category) + '</span></div>' +
+          '<div class="flag-preview">“' + escapeHtml(truncate(e.extractedTextPreview, 70)) + '”</div></div>' +
+          '<div class="flag-risk" style="color:' + riskColor(r) + '">' + r + '</div>' +
+          '</div>';
+      }).join('');
+    }
+
+    // Points card
+    var level = currentLevel();
+    var pointsInLevel = Math.max(0, Math.floor(state.totalPoints || 0)) % 500;
+    $('todayLevelBadge').textContent = 'Level ' + level;
+    $('todayLevelNote').textContent = (500 - pointsInLevel) + ' pts to Level ' + (level + 1);
+    $('todayPoints').textContent = (state.totalPoints || 0).toLocaleString('en-US');
+    $('todayLevelBar').style.width = ((pointsInLevel / 500) * 100) + '%';
+    var missionsWeek = state.missions.completed.filter(function (m) { return m.completedAt && isWithinDays(m.completedAt, 7); }).length;
+    $('todayMissionsWeek').textContent = String(missionsWeek);
+    $('todayBadgeCount').textContent = String(state.badgesChild.length);
+
+    // Browser protection
+    var incidents7d = state.incidents.filter(function (i) { return isWithinDays(i.occurredAt, 7); });
+    var learned7d = incidents7d.filter(function (i) { return i.listSource === 'detected'; });
+    $('todayBrowserCount').textContent = String(uniqueDomains(incidents7d).length);
+    $('todayBrowserNote').textContent = learned7d.length
+      ? uniqueDomains(learned7d).length + ' of them were newly learned — spotted on the device from what the image model saw.'
+      : 'None of them were newly learned this week.';
+  }
+
+  function uniqueDomains(list) {
+    var seen = {};
+    list.forEach(function (i) { seen[i.domain] = true; });
+    return Object.keys(seen);
+  }
+
+  function renderWeekChart(chartId, labelsId, trend, heightMult) {
+    var byDate = {};
+    trend.forEach(function (row) { byDate[row.date] = row; });
+    var today = new Date();
+    var bars = '', labels = '';
+    for (var offset = 6; offset >= 0; offset--) {
+      var day = new Date(today);
+      day.setDate(today.getDate() - offset);
+      var key = day.getFullYear() + '-' + String(day.getMonth() + 1).padStart(2, '0') + '-' + String(day.getDate()).padStart(2, '0');
+      var row = byDate[key];
+      var wb = row ? row.wellbeingScore : 0;
+      var ad = row ? row.addictionScore : 0;
+      var dayLabel = offset === 0 ? 'Today' : day.toLocaleDateString(undefined, { weekday: 'short' });
+      bars += '<div class="week-col"><div class="week-bar" style="height:' + (wb * heightMult) + 'px;background:var(--sage)"></div>' +
+        '<div class="week-bar" style="height:' + (ad * heightMult) + 'px;background:var(--amber)"></div></div>';
+      labels += '<div style="color:' + (offset === 0 ? 'var(--ink)' : 'var(--muted-2)') + '">' + dayLabel + '</div>';
+    }
+    $(chartId).innerHTML = bars;
+    $(labelsId).innerHTML = labels;
+  }
+
+  function approveMission(id) {
+    fetchWithAuth('/missions/' + id + '/approve', { method: 'POST' }).then(function (res) {
+      if (res.ok) { showToast('Mission approved'); return refreshAll(); }
+      return res.json().catch(function () { return {}; }).then(function (err) {
+        showToast('Approve failed: ' + (err.error || 'HTTP ' + res.status));
+      });
+    });
+  }
+  function rejectMission(id) {
+    fetchWithAuth('/missions/' + id + '/reject', { method: 'POST' }).then(function (res) {
+      if (res.ok) { showToast('Sent back — no points given'); return refreshAll(); }
+      return res.json().catch(function () { return {}; }).then(function (err) {
+        showToast('Reject failed: ' + (err.error || 'HTTP ' + res.status));
+      });
+    });
+  }
+
+  /* ============================================================
+   * MISSIONS
+   * ========================================================== */
+  var ST_ORDER = { pending_approval: 0 };
+
+  /** All of the child's mission history, newest first — unfiltered, uncapped. */
+  function historyRows() {
+    var rows = state.missions.completed.concat(state.missions.expired).concat(
+      state.missions.failed.filter(function (m) { return (m.penaltyApplied || 0) > 0; })
+    );
+    rows.sort(function (a, b) {
+      var ta = a.completedAt || a.escapedAt || a.expiresAt || a.createdAt;
+      var tb = b.completedAt || b.escapedAt || b.expiresAt || b.createdAt;
+      return new Date(tb).getTime() - new Date(ta).getTime();
+    });
+    return rows;
+  }
+
+  var HISTORY_PAGE_SIZE = 20; // same cap as demo_dashboard.html's mission-history table
+
+  function renderMissions() {
+    $('missionsChildPossessive').textContent = childPossessive();
+    // Filter FIRST, then cap — capping before filtering would starve "Missed" (skips/
+    // expiries are rare relative to completions, so the top-20 all-time rows are mostly
+    // "Completed" and a Missed filter over just those 20 could show almost nothing even
+    // when the child has plenty of skipped/expired missions further back).
+    var filtered = historyRows().filter(function (m) {
+      if (state.histFilter === 'All') return true;
+      var label = statusLabel(m);
+      if (state.histFilter === 'Done') return label === 'Completed';
+      return label === 'Skipped' || label === 'Expired';
+    });
+    var rows = filtered.slice(0, HISTORY_PAGE_SIZE);
+    var listEl = $('missionsHistoryList');
+    if (!rows.length) {
+      listEl.innerHTML = '<p class="empty plain">No missions in this view yet.</p>';
+    } else {
+      var html = rows.map(function (m) {
+        var kind = kindLabel(m);
+        var label = statusLabel(m);
+        var trigger = m.triggerReason === 'bonus' ? (m.description || 'Bonus') : (triggerLabel(m) || '—');
+        var pts = missionPointsDisplay(m);
+        var when = formatTime(m.completedAt || m.escapedAt || m.expiresAt || m.createdAt);
+        return '<div class="list-row">' +
+          '<div><div class="title">' + escapeHtml(m.title) + '</div><div class="meta">' + escapeHtml(when) + ' · ' + escapeHtml(kind) + ' · ' + escapeHtml(trigger) + '</div></div>' +
+          '<span class="' + statusPillClass(label) + '">' + escapeHtml(label) + '</span>' +
+          '<span class="pts" style="color:' + pts.color + '">' + pts.text + '</span>' +
+          '</div>';
+      }).join('');
+      if (filtered.length > rows.length) {
+        html += '<div style="font-size:12.5px;color:var(--muted-2);padding-top:10px;text-align:center">Showing ' + rows.length + ' of ' + filtered.length + '</div>';
+      }
+      listEl.innerHTML = html;
+    }
+
+    var cmList = $('missionsCustomList');
+    if (!state.customMissions.length) {
+      cmList.innerHTML = '<p class="empty plain">No custom missions yet.</p>';
+    } else {
+      cmList.innerHTML = state.customMissions.map(function (c) {
+        return '<div class="custom-row"><div><span style="font-size:14px;font-weight:700">' + escapeHtml(c.title) + '</span>' +
+          '<div style="font-size:12.5px;color:var(--muted-2)">+' + c.points + ' pts</div></div>' +
+          '<button type="button" class="btn-danger-text" data-action="removeCustom" data-id="' + c.id + '">Remove</button></div>';
+      }).join('');
+      cmList.querySelectorAll('[data-action="removeCustom"]').forEach(function (btn) {
+        btn.addEventListener('click', function () { removeCustomMission(btn.getAttribute('data-id')); });
+      });
+    }
+  }
+
+  document.querySelectorAll('#missionsHistFilters button').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      state.histFilter = btn.getAttribute('data-filter');
+      document.querySelectorAll('#missionsHistFilters button').forEach(function (b) { b.classList.toggle('active', b === btn); });
+      renderMissions();
+    });
+  });
+  document.querySelectorAll('#cmPointsPresets button').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      state.cmPoints = parseInt(btn.getAttribute('data-pts'), 10);
+      document.querySelectorAll('#cmPointsPresets button').forEach(function (b) { b.classList.toggle('active', b === btn); });
+    });
+  });
+  $('cmAddBtn').addEventListener('click', function () {
+    var title = $('cmTitleInput').value.trim();
+    if (!title) { showToast('Give the mission a title first'); return; }
+    // The design's "Your own missions" form collects only a title + points preset — no
+    // description field — but customMissionSchema requires one (min 3 chars). Auto-filled.
+    // Written from the CHILD's side, not the parent's: MissionListScreen.tsx:61 renders
+    // `m.description` directly on the child's device, so "Added by you" would be read by
+    // the child as if they wrote it themselves.
+    fetchWithAuth('/custom-missions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: title, description: 'Added by your parent.', points: state.cmPoints }),
+    }).then(function (res) {
+      if (res.ok) { $('cmTitleInput').value = ''; showToast('Mission added to the pool'); return refreshAll(); }
+      return res.json().catch(function () { return {}; }).then(function (err) { showToast(err.error || 'Failed to add mission'); });
+    });
+  });
+  function removeCustomMission(id) {
+    fetchWithAuth('/custom-missions/' + id, { method: 'DELETE' }).then(function (res) {
+      if (res.ok || res.status === 204) { showToast('Custom mission removed'); return refreshAll(); }
+      showToast('Remove failed');
+    });
+  }
+
+  /* ============================================================
+   * REWARDS
+   * ========================================================== */
+  function renderRewards() {
+    $('rewardsChildHas').textContent = state.profile.displayName ? state.profile.displayName + ' has' : 'Your child has';
+    $('rewardsPointsNote').textContent = (state.totalPoints || 0).toLocaleString('en-US') + ' pts';
+
+    var claimed = state.rewards.filter(function (r) { return r.isClaimed; })
+      .sort(function (a, b) { return new Date(b.claimedAt || 0) - new Date(a.claimedAt || 0); })
+      .slice(0, 5);
+    var bannerEl = $('rewardsClaimedBanner');
+    if (!claimed.length) {
+      bannerEl.innerHTML = '';
+    } else {
+      bannerEl.innerHTML = claimed.map(function (r) {
+        return '<div class="claim-banner"><div><div class="claim-eyebrow">Claimed ' + escapeHtml(formatTime(r.claimedAt)) + '</div>' +
+          '<div class="claim-title">' + escapeHtml(childName()) + ' redeemed “' + escapeHtml(r.title) + '”</div></div></div>';
+      }).join('');
+    }
+
+    var active = state.rewards.filter(function (r) { return !r.isClaimed; });
+    var storeEl = $('rewardsStoreGrid');
+    if (!active.length) {
+      storeEl.innerHTML = '<p class="empty plain">No rewards yet — add one below.</p>';
+    } else {
+      storeEl.innerHTML = active.map(function (r) {
+        var can = state.totalPoints >= r.pointsRequired;
+        var pct = Math.min(100, (state.totalPoints / r.pointsRequired) * 100);
+        return '<div class="reward-tile"><div><div class="t">' + escapeHtml(r.title) + '</div><div class="d">' + escapeHtml(r.description || '') + '</div></div>' +
+          '<div style="display:flex;flex-direction:column;gap:6px;margin-top:auto">' +
+          '<div class="reward-progress-row"><span style="color:var(--teal)">' + r.pointsRequired + ' pts</span><span style="color:var(--muted-2)">' + (can ? 'Can afford' : (r.pointsRequired - state.totalPoints) + ' to go') + '</span></div>' +
+          '<div class="bar-track" style="height:6px"><div class="bar-fill" style="width:' + pct + '%;background:var(--teal)"></div></div>' +
+          '<button type="button" class="btn-danger-text" style="align-self:flex-end" data-action="delReward" data-id="' + r.id + '">Delete</button>' +
+          '</div></div>';
+      }).join('');
+      storeEl.querySelectorAll('[data-action="delReward"]').forEach(function (btn) {
+        btn.addEventListener('click', function () { deleteReward(btn.getAttribute('data-id')); });
+      });
+    }
+
+    $('badgesCount').textContent = state.badgesChild.length + ' of ' + state.badgesAllCount + ' earned';
+    var badgesEl = $('badgesList');
+    if (!state.badgesChild.length) {
+      badgesEl.innerHTML = '<p class="empty plain">No badges earned yet.</p>';
+    } else {
+      badgesEl.innerHTML = state.badgesChild.map(function (b) {
+        return '<div class="badge-row"><div class="badge-icon">' + escapeHtml(b.icon || '🏅') + '</div>' +
+          '<div><div class="badge-name">' + escapeHtml(b.name) + '</div>' +
+          '<div class="badge-when">' + escapeHtml(b.description || '') + (b.earnedAt ? ' · ' + escapeHtml(formatTime(b.earnedAt)) : '') + '</div></div></div>';
+      }).join('');
+    }
+  }
+
+  $('rwAddBtn').addEventListener('click', function () {
+    var title = $('rwTitleInput').value.trim();
+    var pts = parseInt($('rwPointsInput').value, 10);
+    if (!title || !pts || pts < 1) { showToast('Add a title and a point cost'); return; }
+    // Same no-description-field-in-the-design gap as custom missions. Also child-facing —
+    // RewardsStoreScreen.tsx:98-100 renders `r.description` directly on the child's device —
+    // so this reads from the child's side too.
+    fetchWithAuth('/rewards', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: title, description: 'Added by your parent.', pointsRequired: pts }),
+    }).then(function (res) {
+      if (res.ok) { $('rwTitleInput').value = ''; showToast('Reward added to the store'); return refreshAll(); }
+      return res.json().catch(function () { return {}; }).then(function (err) { showToast(err.error || 'Failed to add reward'); });
+    });
+  });
+  function deleteReward(id) {
+    fetchWithAuth('/rewards/' + id, { method: 'DELETE' }).then(function (res) {
+      if (res.ok || res.status === 204) { showToast('Reward deleted'); return refreshAll(); }
+      return res.json().catch(function () { return {}; }).then(function (err) { showToast(err.error || 'Delete failed'); });
+    });
+  }
+
+  document.querySelectorAll('#bonusPresets button').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      state.bonusSel = parseInt(btn.getAttribute('data-bonus'), 10);
+      document.querySelectorAll('#bonusPresets button').forEach(function (b) { b.classList.toggle('active', b === btn); });
+      $('bonusSendBtn').textContent = 'Send ' + state.bonusSel + ' points';
+    });
+  });
+  $('bonusSendBtn').addEventListener('click', function () {
+    var reason = $('bonusReasonInput').value.trim();
+    fetchWithAuth('/bonus/child/' + state.childId, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ points: state.bonusSel, reason: reason }),
+    }).then(function (res) {
+      if (res.ok) { $('bonusReasonInput').value = ''; showToast('Bonus points sent'); return refreshAll(); }
+      return res.json().catch(function () { return {}; }).then(function (err) { showToast(err.error || 'Failed to send bonus'); });
+    });
+  });
+
+  /* ============================================================
+   * SAFETY
+   * ========================================================== */
+  function renderSafety() {
+    var events = state.evFilter === 'Flagged'
+      ? state.events.filter(function (e) { return isToday(e.timestamp) && e.combinedRiskScore != null && e.combinedRiskScore >= 50; })
+      : state.events.filter(function (e) { return isToday(e.timestamp); });
+    var el = $('safetyEventsList');
+    if (!events.length) {
+      el.innerHTML = '<p class="empty plain">No screen activity yet today.</p>';
+    } else {
+      el.innerHTML = events.map(function (e) {
+        var r = e.combinedRiskScore != null ? e.combinedRiskScore : 0;
+        return '<div class="flag-row" style="grid-template-columns:52px minmax(0,1fr) 120px">' +
+          '<div class="flag-time">' + escapeHtml(new Date(e.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })) + '</div>' +
+          '<div><div class="flag-appline"><span class="flag-app">' + escapeHtml(e.appLabel || e.appPackage || 'unknown') + '</span>' +
+          '<span class="' + catPillClass(e.category) + '">' + catLabel(e.category) + '</span></div>' +
+          '<div class="flag-preview">“' + escapeHtml(truncate(e.extractedTextPreview, 60)) + '”</div></div>' +
+          '<div style="display:flex;flex-direction:column;gap:5px"><div style="display:flex;justify-content:space-between;font-size:12px;font-weight:700"><span style="color:var(--muted-2)">Risk</span><span style="color:' + riskColor(r) + '">' + (e.combinedRiskScore != null ? r : '—') + '</span></div>' +
+          '<div class="bar-track" style="height:6px"><div class="bar-fill" style="width:' + r + '%;background:' + riskColor(r) + '"></div></div></div>' +
+          '</div>';
+      }).join('');
+    }
+
+    var incEl = $('safetyIncidentsList');
+    if (!state.incidents.length) {
+      incEl.innerHTML = '<p class="empty plain">No sites blocked yet.</p>';
+    } else {
+      incEl.innerHTML = state.incidents.slice(0, 10).map(function (i) {
+        var learned = i.listSource === 'detected';
+        return '<div class="incident-row"><div><div class="incident-host">' + escapeHtml(i.domain) + '</div>' +
+          '<div class="incident-when">' + escapeHtml(formatTime(i.occurredAt)) + '</div></div>' +
+          '<span class="pill ' + (learned ? 'pill-learned' : 'pill-known') + '">' + (learned ? 'Learned' : 'Known list') + '</span></div>';
+      }).join('');
+    }
+  }
+
+  document.querySelectorAll('#safetyFilters button').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      state.evFilter = btn.getAttribute('data-filter');
+      document.querySelectorAll('#safetyFilters button').forEach(function (b) { b.classList.toggle('active', b === btn); });
+      renderSafety();
+    });
+  });
+
+  /* ============================================================
+   * PROFILE
+   * ========================================================== */
+  var INTEREST_OPTIONS = [
+    { id: 'sports', label: 'Sports & movement', hint: 'Physical activity missions' },
+    { id: 'art', label: 'Art & kindness', hint: 'Creative and social missions' },
+    { id: 'reading', label: 'Reading & learning', hint: 'Quiz and educational missions' },
+    { id: 'family', label: 'Family time', hint: 'Family interaction missions' },
+    { id: 'brain', label: 'Brain games', hint: 'Puzzles and cognitive missions' },
+  ];
+  var currentInterests = [];
+
+  function renderProfile() {
+    var by = state.profile.birthYear;
+    $('profileBirthYear').textContent = by != null ? by : '—';
+    var age = by != null ? (new Date().getFullYear() - by) : null;
+    $('profileAgeLine').textContent = by != null ? ('Born in · ' + age + ' years old') : 'Not set';
+
+    var grid = $('profileInterestsGrid');
+    grid.innerHTML = INTEREST_OPTIONS.map(function (opt) {
+      var on = currentInterests.indexOf(opt.id) !== -1;
+      return '<button type="button" class="interest-btn' + (on ? ' on' : '') + '" data-id="' + opt.id + '">' +
+        '<span class="text-col"><span class="lbl">' + escapeHtml(opt.label) + '</span><span class="hint">' + escapeHtml(opt.hint) + '</span></span>' +
+        '<span class="interest-check">' + (on ? '✓' : '') + '</span></button>';
+    }).join('');
+    grid.querySelectorAll('.interest-btn').forEach(function (btn) {
+      btn.addEventListener('click', function () { toggleInterest(btn.getAttribute('data-id')); });
+    });
+  }
+
+  function saveBirthYear(newYear) {
+    fetchWithAuth('/child/profile', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ childId: state.childId, birthYear: newYear }),
+    }).then(function (res) {
+      if (!res.ok) { showToast('Save failed'); return; }
+      return res.json().then(function (data) {
+        state.profile.birthYear = data.birthYear;
+        showToast('Age saved');
+        if (data.newBadges && data.newBadges.length) showToast('New badge: ' + data.newBadges.join(', '));
+        renderProfile();
+        renderSidebar();
+      });
+    });
+  }
+  $('profileYearDown').addEventListener('click', function () {
+    var y = (state.profile.birthYear || new Date().getFullYear()) - 1;
+    saveBirthYear(Math.max(2000, y));
+  });
+  $('profileYearUp').addEventListener('click', function () {
+    var y = (state.profile.birthYear || new Date().getFullYear()) + 1;
+    saveBirthYear(Math.min(new Date().getFullYear(), y));
+  });
+
+  function toggleInterest(id) {
+    var on = currentInterests.indexOf(id) !== -1;
+    var next = on ? currentInterests.filter(function (x) { return x !== id; }) : currentInterests.concat([id]);
+    fetchWithAuth('/child/interests', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ childId: state.childId, interests: next }),
+    }).then(function (res) {
+      if (!res.ok) { showToast('Save failed'); return; }
+      currentInterests = next;
+      showToast('Interests saved');
+      renderProfile();
+    });
+  }
+  function loadInterests() {
+    return fetchWithAuth('/child/interests/' + state.childId).then(function (res) {
+      if (!res.ok) return;
+      return res.json().then(function (data) {
+        currentInterests = (data.interests || []).filter(function (s) {
+          return INTEREST_OPTIONS.some(function (o) { return o.id === s; });
+        });
+      });
+    });
+  }
+
+  /* ============================================================
+   * MONITORING (full debug view, kept from demo_dashboard.html)
+   * ========================================================== */
+  function renderMonitoring() {
+    var todayEvents = state.monEvents.filter(function (e) { return isToday(e.timestamp); });
+    $('monEventsToday').textContent = String(todayEvents.length);
+    var withScore = todayEvents.filter(function (e) { return e.combinedRiskScore != null; });
+    var avg = withScore.length ? Math.round(withScore.reduce(function (s, e) { return s + Number(e.combinedRiskScore); }, 0) / withScore.length) : null;
+    var avgEl = $('monAvgRisk');
+    avgEl.textContent = avg != null ? avg + '/100' : '—';
+    avgEl.style.color = avg != null && avg > 50 ? 'var(--coral-deep)' : 'var(--sage)';
+    var counts = {};
+    todayEvents.forEach(function (e) { var c = e.category || 'neutral'; counts[c] = (counts[c] || 0) + 1; });
+    var top = Object.keys(counts).sort(function (a, b) { return counts[b] - counts[a]; })[0];
+    $('monTopCategory').textContent = top ? catLabel(top) : '—';
+
+    renderWeekChart('monWeekChart', 'monWeekLabels', state.scoreTrend, 1.8);
+
+    var logEl = $('monActivityLog');
+    if (!activityEntries.length) {
+      logEl.innerHTML = '<div style="color:var(--side-muted);font-size:12px">Waiting for first fetch…</div>';
+    } else {
+      logEl.innerHTML = activityEntries.slice(0, 40).map(function (e) {
+        var t = new Date(e.at).toLocaleTimeString();
+        var color = e.status >= 200 && e.status < 300 ? 'var(--side-accent)' : '#F07A5F';
+        return '<div class="mon-log-row"><span style="color:var(--side-muted)">' + t + '</span>' +
+          '<span style="color:var(--gold);font-weight:700">' + e.method + '</span>' +
+          '<span style="color:var(--sand);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + escapeHtml(e.path) + '</span>' +
+          '<span style="text-align:right;font-weight:700;color:' + color + '">' + e.status + '</span></div>';
+      }).join('');
+    }
+
+    var tbody = $('monEventsTable');
+    if (!state.monEvents.length) {
+      tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--muted-2)">No screen events yet. Start the mobile app with monitoring enabled.</td></tr>';
+    } else {
+      tbody.innerHTML = state.monEvents.map(function (e) {
+        var risk = e.riskScore != null ? e.riskScore : '—';
+        var combined = e.combinedRiskScore != null ? e.combinedRiskScore : '—';
+        return '<tr>' +
+          '<td style="font-family:ui-monospace,Consolas,Menlo,monospace;font-size:12px;color:var(--muted)">' + escapeHtml(formatTime(e.timestamp)) + '</td>' +
+          '<td><span style="font-weight:700">' + escapeHtml(e.appLabel || e.appPackage || 'unknown') + '</span><span class="pkg">' + escapeHtml(e.appPackage || '') + '</span></td>' +
+          '<td class="mon-preview-cell" style="color:var(--muted);max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + escapeHtml(truncate(e.extractedTextPreview, 60)) + '</td>' +
+          '<td class="num" style="color:' + (e.riskScore != null ? riskColor(e.riskScore) : 'var(--muted-2)') + '">' + risk + '</td>' +
+          '<td class="num" style="color:' + (e.combinedRiskScore != null ? riskColor(e.combinedRiskScore) : 'var(--muted-2)') + '">' + combined + '</td>' +
+          '<td><span class="' + catPillClass(e.category) + '">' + catLabel(e.category) + '</span></td>' +
+          '<td style="font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + escapeHtml(imageLabels(e.imageClassificationDetails)) + '</td>' +
+          '</tr>';
+      }).join('');
+    }
+
+    $('monStatusLine').textContent = (state.autoRefresh ? 'Auto-refresh every 10 s' : 'Auto-refresh paused') + ' · updated ' + state.monAgo + ' s ago';
+    $('monDot').style.background = state.autoRefresh ? 'var(--sage)' : 'var(--muted-2)';
+    $('monAutoBtn').textContent = state.autoRefresh ? 'Stop auto-refresh' : 'Start auto-refresh';
+  }
+
+  $('monRefreshBtn').addEventListener('click', function () { refreshAll(); });
+  $('monAutoBtn').addEventListener('click', function () {
+    state.autoRefresh = !state.autoRefresh;
+    scheduleAuto();
+    renderMonitoring();
+  });
+  $('monApiBase').addEventListener('change', function () {
+    state.apiBase = $('monApiBase').value.replace(/\/$/, '');
+    state.parentToken = null;
+    refreshAll();
+  });
+  $('monChildId').addEventListener('change', function () {
+    state.childId = $('monChildId').value.trim() || DEFAULT_CHILD;
+    state.profile = { displayName: null, birthYear: null };
+    currentInterests = [];
+    refreshAll();
+  });
+  $('monEventsLimit').addEventListener('change', function () {
+    state.monLimit = Math.max(1, Math.min(100, parseInt($('monEventsLimit').value, 10) || 20));
+    refreshAll();
+  });
+
+  /* ============================================================
+   * Browser notifications — same dedup pattern as demo_dashboard.html
+   * ========================================================== */
+  function notifySnapshotKey() {
+    var pending = state.missions.pendingApproval.map(function (m) { return m.id; }).sort().join(',');
+    var escapesKey = recentEscapes().map(function (m) { return m.id; }).sort().join(',');
+    return pending + '|' + escapesKey;
+  }
+  function checkBrowserNotifications() {
+    if (!('Notification' in window) || Notification.permission !== 'granted') return;
+    var key = notifySnapshotKey();
+    var stored = null;
+    try { stored = localStorage.getItem(NOTIFY_STORAGE_KEY); } catch (e) { /* ignore */ }
+    if (stored === key || lastNotifySnapshot === key) { lastNotifySnapshot = key; return; }
+    var pending = state.missions.pendingApproval;
+    var escapes = recentEscapes();
+    if (pending.length) new Notification('SafeGuard', { body: pending.length + ' mission(s) awaiting your approval' });
+    if (escapes.length) new Notification('SafeGuard', { body: 'A mission was skipped (−' + (escapes[0].penaltyApplied || 10) + ' pts)' });
+    try { localStorage.setItem(NOTIFY_STORAGE_KEY, key); } catch (e) { /* ignore */ }
+    lastNotifySnapshot = key;
+  }
+
+  /* ============================================================
+   * Orchestration
+   * ========================================================== */
+  function refreshAll() {
+    hideBanner();
+    return ensureParentToken().then(function () {
+      return Promise.all([
+        fetchChildProfile().catch(function () { return { displayName: null, birthYear: null }; }),
+        fetchChildPoints().catch(function () { return { totalPoints: 0 }; }),
+        fetchMissions().catch(function () { return { pending: [], pendingApproval: [], completed: [], expired: [], failed: [] }; }),
+        fetchRewards().catch(function () { return []; }),
+        fetchChildBadges().catch(function () { return []; }),
+        fetchAllBadgesCount().catch(function () { return 0; }),
+        fetchLatestScore().catch(function () { return null; }),
+        fetchScoresTrend().catch(function () { return []; }),
+        fetchScreenEvents(AGGREGATE_EVENTS_LIMIT).catch(function () { return []; }),
+        fetchScreenEvents(state.monLimit).catch(function () { return []; }),
+        fetchBrowserIncidents(50).catch(function () { return []; }),
+        fetchCustomMissions().catch(function () { return []; }),
+        loadInterests(),
+      ]);
+    }).then(function (results) {
+      state.profile = { displayName: results[0].displayName ?? null, birthYear: results[0].birthYear ?? null };
+      state.totalPoints = results[1].totalPoints || 0;
+      state.missions = results[2];
+      state.rewards = results[3];
+      state.badgesChild = results[4];
+      state.badgesAllCount = results[5];
+      state.scoreLatest = results[6];
+      state.scoreTrend = results[7];
+      state.events = results[8];
+      state.monEvents = results[9];
+      state.incidents = results[10];
+      state.customMissions = results[11];
+      state.monAgo = 0;
+
+      renderSidebar();
+      renderHeader();
+      renderToday();
+      renderMissions();
+      renderRewards();
+      renderSafety();
+      renderProfile();
+      renderMonitoring();
+      checkBrowserNotifications();
+    }).catch(function (err) {
+      showBanner('Backend unreachable or API error: ' + (err.message || String(err)) + '. Is the API running on ' + state.apiBase + '?');
+    });
+  }
+
+  function scheduleAuto() {
+    if (refreshTimer) clearInterval(refreshTimer);
+    if (notifyTimer) clearInterval(notifyTimer);
+    if (state.autoRefresh) {
+      refreshTimer = setInterval(refreshAll, REFRESH_MS);
+      notifyTimer = setInterval(function () {
+        fetchMissions().then(function (m) { state.missions = m; checkBrowserNotifications(); }).catch(function () {});
+      }, NOTIFY_MS);
+    }
+  }
+  var monAgoTicker = setInterval(function () {
+    if (state.autoRefresh) {
+      state.monAgo += 1;
+      if (state.view === 'monitoring') {
+        $('monStatusLine').textContent = 'Auto-refresh every 10 s · updated ' + state.monAgo + ' s ago';
+      }
+    }
+  }, 1000);
+
+  if ('Notification' in window) {
+    Notification.requestPermission().catch(function () {});
+  }
+
+  // Seed Monitoring's connection panel from state, then boot.
+  $('monChildId').value = state.childId;
+  refreshAll();
+  scheduleAuto();
+})();
+</script>
+</body>
+</html>
